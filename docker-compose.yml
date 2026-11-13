@@ -1,0 +1,42 @@
+# docker compose up --build で、PostgreSQL・バックエンド・フロントエンドをまとめて起動する
+# 画面: http://localhost:3000 ／ API: http://localhost:8000/docs
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: studyplan
+      POSTGRES_PASSWORD: studyplan
+      POSTGRES_DB: studyplan
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U studyplan"]
+      interval: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://studyplan:studyplan@db:5432/studyplan
+      CORS_ORIGINS: http://localhost:3000
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_BASE: http://localhost:8000/api
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  db-data:
