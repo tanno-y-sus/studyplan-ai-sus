@@ -3,9 +3,9 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
-# ブラウザから見たバックエンドの URL（ビルド時に埋め込まれる）
-ARG NEXT_PUBLIC_API_BASE=http://localhost:8000/api
-ENV NEXT_PUBLIC_API_BASE=$NEXT_PUBLIC_API_BASE NEXT_TELEMETRY_DISABLED=1
+# 画面の /api/* を中継する先のバックエンド（next.config.ts の rewrites。ビルド時に埋め込まれる）
+ARG BACKEND_URL=http://backend:8000
+ENV BACKEND_URL=$BACKEND_URL NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
 FROM node:22-alpine

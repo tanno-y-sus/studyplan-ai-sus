@@ -18,7 +18,7 @@ export default function LoginPage() {
   useEffect(() => {
     api<User[]>("/users")
       .then(setUsers)
-      .catch(() => setError("サーバーに接続できません。バックエンド（http://localhost:8000）が起動しているか確認してください"));
+      .catch(() => setError("サーバーに接続できません。バックエンド（既定は http://localhost:8000）が起動しているか確認してください"));
   }, []);
 
   return (
