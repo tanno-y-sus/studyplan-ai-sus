@@ -1,8 +1,8 @@
 """Gemini API の接続確認。backend フォルダで `python -m app.ai.check` を実行する。
 
 1. 設定（.env）を表示する（キーは先頭4文字だけ）
-2. キーとモデル名が正しいかを確かめる（モデル情報の取得。回数の消費はほぼなし）
-3. 小さな質問を1回送り、決まった形式（JSON）で答えが返るかを確かめる
+2. キーが有効か、モデル名が存在するかを確かめる（モデル情報の取得）
+3. 小さな質問を1回送り、決まった形式（JSON）で答えが返るかを確かめる（実際に使えるかはここで判定）
 """
 
 from __future__ import annotations
@@ -61,7 +61,8 @@ def run(
     if res.status_code >= 400:
         out(f"NG: {http_error_message(res.status_code, cfg.gemini_model)}")
         return False
-    out(f"OK: キーとモデルを確認しました（{res.json().get('displayName', cfg.gemini_model)}）")
+    out(f"OK: キーは有効で、モデル情報を取得できました（{res.json().get('displayName', cfg.gemini_model)}）")
+    out("   ※ 一覧に出ていても、古いモデルは新しいキーでは使えないことがあります。次の質問で確認します")
 
     # 3. 小さな質問
     ai = GeminiAI(cfg.gemini_api_key, cfg.gemini_model, client=client)

@@ -149,7 +149,10 @@ def http_error_message(status: int, model: str, detail: str = "") -> str:
     if status == 429:
         msg = "Gemini API の無料枠の上限に達しました（1分あたり・1日あたりの回数）。しばらく時間をおいてやり直してください"
     elif status == 404:
-        msg = f"Gemini のモデル「{model}」が見つかりません。.env の GEMINI_MODEL を確認してください"
+        msg = (
+            f"Gemini のモデル「{model}」を使えません。古いモデルは新しいキー・プロジェクトでは使えないことがあります。"
+            ".env の GEMINI_MODEL を新しいモデル（例：gemini-3.1-flash-lite）に変更してください"
+        )
     elif status in (400, 401, 403):
         msg = "Gemini API キーが正しくないか、使えない状態です。.env の GEMINI_API_KEY を確認してください"
     elif status >= 500:
@@ -161,10 +164,16 @@ def http_error_message(status: int, model: str, detail: str = "") -> str:
 
 
 def _error_detail(res: httpx.Response) -> str:
+    """Google が返したエラーの種類と説明文（英語。原因の特定に使う）。"""
     try:
-        return str(res.json()["error"]["status"])
+        err = res.json()["error"]
     except (ValueError, KeyError, TypeError):
         return ""
+    if not isinstance(err, dict):
+        return ""
+    status = str(err.get("status") or "")
+    message = str(err.get("message") or "")[:200]
+    return " ".join(x for x in (status, message) if x)
 
 
 def extract_text(data: dict) -> str:
