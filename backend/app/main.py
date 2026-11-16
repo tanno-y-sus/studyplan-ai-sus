@@ -12,6 +12,7 @@ from app.ai.factory import choose_ai
 from app.api.routes import router
 from app.config import ENV_FILES, settings
 from app.db import Base, SessionLocal, engine
+from app.search.router import search_status
 from app.seed import seed
 
 
@@ -24,6 +25,14 @@ async def lifespan(_: FastAPI):
     log = logging.getLogger("uvicorn.error")
     log.info("設定ファイル: %s", ", ".join(str(p) for p in ENV_FILES) or "なし（.env は読み込んでいません）")
     log.info("AI: %s", choose_ai(settings).reason)
+    search, missing = search_status(settings)
+    log.info("教材の検索: %s", ", ".join(search))
+    if "demo" in search:
+        log.info(
+            "  デモ検索の教材は実在しない URL（example.com）です。.env の SEARCH_PROVIDERS で本物に切り替えられます"
+        )
+    for m in missing:
+        log.info("  使えない検索: %s", m)
     yield
 
 

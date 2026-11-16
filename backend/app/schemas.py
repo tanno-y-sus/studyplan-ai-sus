@@ -307,3 +307,5 @@ class AIStatusOut(BaseModel):
     reason: str
     today_count: int | None = None  # Gemini の今日の利用回数（アプリで数えている分）
     daily_limit: int | None = None
+    search: list[str] = []  # 教材探しに使う検索（demo / tavily / qiita / youtube）
+    search_missing: list[str] = []  # 設定にあるがキーがなくて使えない検索

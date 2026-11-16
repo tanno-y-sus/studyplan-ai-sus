@@ -135,6 +135,8 @@ export interface AIStatus {
   reason: string;
   today_count: number | null;
   daily_limit: number | null;
+  search: string[];
+  search_missing: string[];
 }
 
 export class ApiError extends Error {
