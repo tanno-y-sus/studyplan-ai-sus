@@ -15,7 +15,7 @@ from typing import TypeVar
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from app.ai.base import AIError
+from app.ai.base import AIError, AIUnavailable
 from app.schemas import (
     AIReschedule,
     AISchedule,
@@ -55,7 +55,7 @@ class GeminiAI:
     # ------------------------------------------------------------------ 共通
     def _ask(self, prompt: str, model_cls: type[T]) -> T:
         if self.on_call:
-            self.on_call()
+            self.on_call()  # 1日の上限なら AILimitReached（AIUnavailable）を出す
         schema = json.dumps(model_cls.model_json_schema(), ensure_ascii=False)
         body = {
             "systemInstruction": {"parts": [{"text": SYSTEM}]},
@@ -67,19 +67,26 @@ class GeminiAI:
             ],
             "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2},
         }
-        try:
-            res = self.client.post(
-                API_URL.format(model=self.model), json=body, headers={"x-goog-api-key": self.api_key}
-            )
-            res.raise_for_status()
-            data = res.json()
-            text = data["candidates"][0]["content"]["parts"][0]["text"]
-        except (httpx.HTTPError, KeyError, IndexError, ValueError) as e:
-            raise AIError(f"Gemini API の呼び出しに失敗しました: {e}") from e
+        data = self._post(API_URL.format(model=self.model), body)
+        text = extract_text(data)
         try:
             return model_cls.model_validate_json(text)
         except ValidationError as e:
             raise AIError(f"AI の回答が決まった形式ではありません: {e.error_count()}件の問題") from e
+
+    def _post(self, url: str, body: dict) -> dict:
+        try:
+            res = self.client.post(url, json=body, headers={"x-goog-api-key": self.api_key})
+        except httpx.HTTPError as e:
+            raise AIUnavailable(
+                "Gemini API に接続できません。ネットワーク（社内のプロキシなど）を確認してください"
+            ) from e
+        if res.status_code >= 400:
+            raise AIUnavailable(http_error_message(res.status_code, self.model, _error_detail(res)))
+        try:
+            return res.json()
+        except ValueError as e:
+            raise AIError("Gemini API の回答を読み取れませんでした") from e
 
     # ------------------------------------------------------------------ 各処理
     def normalize_topic(self, text: str) -> TopicNormalization:
@@ -135,6 +142,50 @@ class GeminiAI:
             + f"# 状況\n{ctx.model_dump_json()}"
         )
         return self._ask(prompt, AIReschedule)
+
+
+def http_error_message(status: int, model: str, detail: str = "") -> str:
+    """Gemini API のエラーを、利用者が対処できる日本語の文にする。"""
+    if status == 429:
+        msg = "Gemini API の無料枠の上限に達しました（1分あたり・1日あたりの回数）。しばらく時間をおいてやり直してください"
+    elif status == 404:
+        msg = f"Gemini のモデル「{model}」が見つかりません。.env の GEMINI_MODEL を確認してください"
+    elif status in (400, 401, 403):
+        msg = "Gemini API キーが正しくないか、使えない状態です。.env の GEMINI_API_KEY を確認してください"
+    elif status >= 500:
+        msg = "Gemini 側で一時的な障害が起きています。しばらく時間をおいてやり直してください"
+    else:
+        msg = "Gemini API の呼び出しに失敗しました"
+    suffix = f"（{status}" + (f"：{detail}" if detail else "") + "）"
+    return msg + suffix
+
+
+def _error_detail(res: httpx.Response) -> str:
+    try:
+        return str(res.json()["error"]["status"])
+    except (ValueError, KeyError, TypeError):
+        return ""
+
+
+def extract_text(data: dict) -> str:
+    """回答から本文を取り出す。考え中のメモ（thought）は除き、止められた理由があれば日本語で伝える。"""
+    block = (data.get("promptFeedback") or {}).get("blockReason")
+    if block:
+        raise AIError(f"Gemini が質問への回答を止めました（理由：{block}）")
+    candidates = data.get("candidates") or []
+    if not candidates:
+        raise AIError("Gemini から回答がありませんでした")
+    cand = candidates[0]
+    parts = (cand.get("content") or {}).get("parts") or []
+    text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
+    finish = cand.get("finishReason")
+    if not text:
+        if finish == "SAFETY":
+            raise AIError("Gemini が安全上の理由で回答を止めました")
+        raise AIError(f"Gemini の回答が空でした（{finish or '理由不明'}）")
+    if finish == "MAX_TOKENS":
+        raise AIError("Gemini の回答が長すぎて途中で切れました")
+    return text
 
 
 def _feedback(items: list[str]) -> str:

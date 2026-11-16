@@ -4,6 +4,30 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+
+def load_env_files(*paths: Path) -> list[Path]:
+    """.env を読み込む（backend/.env → リポジトリ直下の .env の順）。
+
+    すでに設定されている環境変数は上書きしない。テストでは STUDYPLAN_NO_DOTENV=1 にして読み込まない
+    （自分の PC の .env に入れた本物のキーでテストが外部に通信しないようにするため）。
+    """
+    if os.getenv("STUDYPLAN_NO_DOTENV") == "1":
+        return []
+    loaded = []
+    for path in paths or (BACKEND_DIR / ".env", BACKEND_DIR.parent / ".env"):
+        if path.is_file():
+            load_dotenv(path, override=False)
+            loaded.append(path)
+    return loaded
+
+
+ENV_FILES = load_env_files()
 
 
 def _list(value: str | None, default: list[str]) -> list[str]:

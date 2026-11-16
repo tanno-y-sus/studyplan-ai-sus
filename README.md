@@ -84,16 +84,39 @@ docker compose up --build
 | `ALLOWED_DOMAINS` | 検索してよいドメイン（公式ドキュメント系） |
 | `TODAY` | デモ用に「今日」を固定（例：`2026-12-10`） |
 
+### Gemini を使う手順
+
+1. [Google AI Studio](https://aistudio.google.com/) に Google アカウントでログインし、「Get API key」→「Create API key」でキーを発行する（無料枠は支払い情報の登録不要）
+2. リポジトリ直下（または `backend/`）の `.env.example` をコピーして `.env` にし、次を書く
+
+   ```bash
+   AI_PROVIDER=gemini
+   GEMINI_API_KEY=（発行したキー）
+   ```
+
+3. 接続を確認する（キーとモデル名の確認 → 小さな質問を1回送る）
+
+   ```bash
+   cd backend
+   .venv/bin/python -m app.ai.check        # Windows は .venv\Scripts\python -m app.ai.check
+   ```
+
+   「準備完了です」と出れば OK。モデルが見つからない場合は、使えるモデル名の一覧が出るので `GEMINI_MODEL` に設定する
+4. バックエンドを起動（または再起動）する。起動ログと S03・S08 の「使用中の AI」に Gemini と表示される
+
+Gemini を使えないとき（キーの誤り・無料枠の上限・通信できない・Gemini 側の障害）は、デモ AI に切り替えずに **エラーで止めます**（画面に理由を表示、プランは保存しない、作り直しで回数を無駄にしない）。
+`.env` はバックエンド起動時に読み込みます（すでにある環境変数が優先）。テストでは読み込みません。
+
 注意：
 
 - **Gemini の無料枠では、送った内容が Google の製品改善に使われます。** アプリが AI に送るのは単元名・レベル・目的・日付・教材情報だけで、氏名などは送りません（`ScheduleContext` に個人情報の項目がないことをテストで確認しています）。社内の生成 AI 利用ルールの確認が必要です
 - 無料枠の回数は `api_usage` テーブルに記録し、S08 で確認できます。上限に達した検索 API は飛ばして次を使います
-- 実際の Gemini・Tavily・Qiita・YouTube への接続は未確認です（キー未取得のため）。各アダプタは通信をモックしたテストで確認しています
+- 実際の Gemini・Tavily・Qiita・YouTube での動作（正しいキーでの回答）は未確認です（キー未取得のため）。各アダプタは通信をモックしたテストで確認しています。Gemini はキーが誤っている場合のエラー表示まで本物の API で確認済み
 
 ## テスト
 
 ```bash
-cd backend && .venv/bin/pytest -q          # 65件：確認ロジック、カレンダー、AI の作り直し、API の一連の流れ、外部 API アダプタ
+cd backend && .venv/bin/pytest -q          # 83件：確認ロジック、カレンダー、AI の作り直し、API の一連の流れ、外部 API アダプタ、Gemini 連携
 cd backend && .venv/bin/ruff check . && .venv/bin/ruff format --check .
 cd frontend && npm run lint && npx tsc --noEmit && npm run build
 ```

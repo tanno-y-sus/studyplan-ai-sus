@@ -296,3 +296,14 @@ class UsageOut(BaseModel):
     period: str
     count: int
     limit: int
+
+
+class AIStatusOut(BaseModel):
+    """今使っている AI（S03・S08 に表示）。"""
+
+    provider: str  # gemini / demo
+    model: str | None
+    configured: str  # .env の AI_PROVIDER の値
+    reason: str
+    today_count: int | None = None  # Gemini の今日の利用回数（アプリで数えている分）
+    daily_limit: int | None = None

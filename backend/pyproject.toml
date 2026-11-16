@@ -13,3 +13,6 @@ ignore = ["B008", "E501"]  # 行の長さは ruff format に任せる
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/conftest.py" = ["E402"]  # .env を読まない設定を app の import より前に行うため

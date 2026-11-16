@@ -5,6 +5,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { AIStatusNote } from "@/components/AIStatusNote";
 import { AppShell } from "@/components/AppShell";
 import { Alert, Badge, Button, Card, Spinner } from "@/components/ui";
 import { api, ApiError, type Plan } from "@/lib/api";
@@ -231,6 +232,7 @@ function NewPlanForm() {
             AI に教材とスケジュールを提案してもらう
           </Button>
         )}
+        <AIStatusNote />
       </div>
     </div>
   );
