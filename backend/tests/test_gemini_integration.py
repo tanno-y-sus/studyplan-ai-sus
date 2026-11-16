@@ -206,3 +206,25 @@ def test_check_command_without_key():
     lines: list[str] = []
     assert run_check(Settings(gemini_api_key=None), out=lines.append) is False
     assert any("未設定" in line for line in lines)
+
+
+def test_check_command_old_model_is_listed_but_cannot_generate():
+    """新しいキーで古いモデルを使うと、モデル情報は取れるのに質問が 404 になる（実際に起きたケース）。"""
+    google_msg = "This model models/gemini-2.5-flash-lite is no longer available to new users."
+
+    def handler(request: httpx.Request):
+        if request.method == "GET":
+            return httpx.Response(200, json={"name": "models/gemini-2.5-flash-lite", "displayName": "Old"})
+        return httpx.Response(404, json={"error": {"status": "NOT_FOUND", "message": google_msg}})
+
+    lines: list[str] = []
+    cfg = Settings(ai_provider="gemini", gemini_api_key="k", gemini_model="gemini-2.5-flash-lite")
+    assert run_check(cfg, client=_client(handler), out=lines.append) is False
+    text = "\n".join(lines)
+    assert "no longer available to new users" in text  # Google の説明文をそのまま見せる
+    assert "gemini-3.1-flash-lite" in text  # 変更先の例
+    assert "準備完了" not in text
+
+
+def test_default_model_is_available_to_new_projects():
+    assert Settings().gemini_model == "gemini-3.1-flash-lite"

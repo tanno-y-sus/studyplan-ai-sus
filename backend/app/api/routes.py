@@ -28,6 +28,7 @@ from app.schemas import (
     UsageOut,
     UserOut,
 )
+from app.search.router import search_status
 from app.services import plans as plan_service
 from app.services.calendar import available_dates, count_all_days
 from app.services.normalize import GENERIC_LEVEL_GUIDES, TopicError, find_topic
@@ -50,8 +51,14 @@ def health() -> dict:
 @router.get("/ai/status", response_model=AIStatusOut)
 def ai_status(db: Session = Depends(get_db), user: User = Depends(current_user)):
     choice = choose_ai(settings)
+    search, missing = search_status(settings)
     out = AIStatusOut(
-        provider=choice.provider, model=choice.model, configured=settings.ai_provider, reason=choice.reason
+        provider=choice.provider,
+        model=choice.model,
+        configured=settings.ai_provider,
+        reason=choice.reason,
+        search=search,
+        search_missing=missing,
     )
     if choice.provider == "gemini":
         row = db.scalar(

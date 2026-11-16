@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.ai.base import AIProvider
 from app.config import Settings, settings
 from app.models import Material, MaterialSection, Topic
-from app.search.router import search_materials
+from app.search.router import search_materials, uses_demo_search
 
 
 def check_url(url: str | None, cfg: Settings = settings) -> str:
@@ -27,10 +27,38 @@ def check_url(url: str | None, cfg: Settings = settings) -> str:
         return "接続できません"
 
 
+DEMO_RETIRED_COMMENT = "本物の検索 API に切り替えたため、デモ検索の教材（実在しない URL）を除外しました"
+
+
+def retire_demo_materials(topic: Topic) -> int:
+    """デモ検索で見つけた教材（example.com のダミー）を、使い回しの対象から外す。
+
+    デモ教材と一緒に AI が作った実践課題（source=ai）も同じ組なので一緒に外す。
+    """
+    retired = 0
+    for status in ("approved", "ai_pending"):
+        group = [m for m in topic.materials if m.status == status]
+        if not any(m.source == "demo" for m in group):
+            continue
+        for m in group:
+            if m.source in ("demo", "ai"):
+                m.status = "rejected"
+                m.review_comment = DEMO_RETIRED_COMMENT
+                retired += 1
+    return retired
+
+
 def materials_for_topic(
-    db: Session, topic: Topic, current_level: int, target_level: int, ai: AIProvider
+    db: Session,
+    topic: Topic,
+    current_level: int,
+    target_level: int,
+    ai: AIProvider,
+    cfg: Settings = settings,
 ) -> tuple[list[Material], list[str]]:
     """プランに使う教材と、利用者への注意文を返す。"""
+    if not uses_demo_search(cfg):
+        retire_demo_materials(topic)
     approved = [m for m in topic.materials if m.status == "approved"]
     if approved:
         return approved, []
@@ -39,7 +67,7 @@ def materials_for_topic(
     if pending:  # 以前 AI が探した結果を使い回す（検索回数の節約）
         return pending, ["AI が探した教材です（育成担当のレビュー前）"]
 
-    outcome = search_materials(db, topic.name)
+    outcome = search_materials(db, topic.name, cfg=cfg)
     notes = ["AI が探した教材です（育成担当のレビュー前）"]
     if outcome.skipped:
         notes.append("一部の検索 API を使えませんでした：" + " / ".join(outcome.skipped[:3]))

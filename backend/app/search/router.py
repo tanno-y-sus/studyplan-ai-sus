@@ -36,6 +36,24 @@ def build_providers(cfg: Settings = settings) -> list[tuple[object, int]]:
     return out
 
 
+def search_status(cfg: Settings = settings) -> tuple[list[str], list[str]]:
+    """（実際に使う検索の名前, キーがなくて使えない検索の説明）。画面とログに出す。"""
+    used = [p.name for p, _ in build_providers(cfg)]  # type: ignore[attr-defined]
+    missing = []
+    for name in cfg.search_providers:
+        if name == "tavily" and not cfg.tavily_api_key:
+            missing.append("tavily：TAVILY_API_KEY が未設定")
+        elif name == "youtube" and not cfg.youtube_api_key:
+            missing.append("youtube：YOUTUBE_API_KEY が未設定")
+        elif name not in ("tavily", "qiita", "youtube", "demo"):
+            missing.append(f"{name}：対応していない検索です")
+    return used, missing
+
+
+def uses_demo_search(cfg: Settings = settings) -> bool:
+    return "demo" in search_status(cfg)[0]
+
+
 def search_materials(
     db: Session, topic: str, providers: list[tuple[object, int]] | None = None, cfg: Settings = settings
 ) -> SearchOutcome:

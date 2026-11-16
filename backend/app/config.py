@@ -46,7 +46,7 @@ class Settings:
     # AI: demo | gemini
     ai_provider: str = field(default_factory=lambda: os.getenv("AI_PROVIDER", "demo"))
     gemini_api_key: str | None = field(default_factory=lambda: os.getenv("GEMINI_API_KEY"))
-    gemini_model: str = field(default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite"))
+    gemini_model: str = field(default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite"))
     gemini_daily_limit: int = field(default_factory=lambda: int(os.getenv("GEMINI_DAILY_LIMIT", "500")))
 
     # 検索: demo / tavily / qiita / youtube を優先順に並べる
@@ -79,6 +79,12 @@ class Settings:
                 "nextjs.org",
                 "go.dev",
                 "docs.oracle.com",
+                "dev.java",
+                "docs.spring.io",
+                "spring.io",
+                "cloud.google.com",
+                "www.typescriptlang.org",
+                "git-scm.com",
                 "roadmap.sh",
                 "qiita.com",
                 "zenn.dev",
