@@ -19,8 +19,15 @@ class AIError(Exception):
     """AI の呼び出し失敗、または決まった形式で返ってこなかった場合。"""
 
 
-class AILimitReached(AIError):
-    """無料枠の上限に達した場合。"""
+class AIUnavailable(AIError):
+    """AI を使えない場合（通信できない・キーが正しくない・無料枠の上限・一時的な障害）。
+
+    作り直しを頼んでも結果は変わらないので、その場で処理を止めて画面にエラーを返す。
+    """
+
+
+class AILimitReached(AIUnavailable):
+    """無料枠の上限に達した場合（アプリ側で数えている1日の上限）。"""
 
 
 class AIProvider(Protocol):

@@ -6,12 +6,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.ai.base import AIError, AIProvider
+from app.ai.base import AIError, AIProvider, AIUnavailable
+from app.ai.factory import choose_ai
 from app.api.deps import ai_provider, current_user, require_role
 from app.config import settings
 from app.db import get_db
-from app.models import Material, Plan, Task, Topic, TopicAlias, User
+from app.models import ApiUsage, Material, Plan, Task, Topic, TopicAlias, User
 from app.schemas import (
+    AIStatusOut,
     AvailabilityOut,
     LevelGuideOut,
     PlanCreate,
@@ -29,7 +31,7 @@ from app.schemas import (
 from app.services import plans as plan_service
 from app.services.calendar import available_dates, count_all_days
 from app.services.normalize import GENERIC_LEVEL_GUIDES, TopicError, find_topic
-from app.services.usage import latest_usage
+from app.services.usage import latest_usage, period_key
 
 router = APIRouter()
 
@@ -43,6 +45,21 @@ def health() -> dict:
         "search_providers": settings.search_providers,
         "today": settings.today().isoformat(),
     }
+
+
+@router.get("/ai/status", response_model=AIStatusOut)
+def ai_status(db: Session = Depends(get_db), user: User = Depends(current_user)):
+    choice = choose_ai(settings)
+    out = AIStatusOut(
+        provider=choice.provider, model=choice.model, configured=settings.ai_provider, reason=choice.reason
+    )
+    if choice.provider == "gemini":
+        row = db.scalar(
+            select(ApiUsage).where(ApiUsage.provider == "gemini", ApiUsage.period == period_key("day"))
+        )
+        out.today_count = row.count if row else 0
+        out.daily_limit = settings.gemini_daily_limit
+    return out
 
 
 @router.get("/users", response_model=list[UserOut])
@@ -120,6 +137,9 @@ def create_plan(
 ):
     try:
         plan = plan_service.create_plan(db, user, data, ai)
+    except AIUnavailable:
+        db.rollback()  # 途中まで作ったプランは保存しない（503 は main.py でまとめて返す）
+        raise
     except TopicError as e:
         db.rollback()
         raise HTTPException(status_code=422, detail={"message": str(e), "suggestions": e.suggestions}) from e

@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { AIStatusNote } from "@/components/AIStatusNote";
 import { AppShell } from "@/components/AppShell";
 import { Alert, Badge, Bar, Button, Card } from "@/components/ui";
 import { api, SOURCE_LABEL, TYPE_LABEL, type ReviewMaterial, type Usage } from "@/lib/api";
@@ -72,6 +73,7 @@ export default function ReviewPage() {
           </Card>
           <Card className="flex flex-col gap-2.5 p-4">
             <span className="text-sm font-bold">API の利用状況（無料枠）</span>
+            <AIStatusNote detail />
             {usage.length === 0 && <span className="text-xs text-slate-500">まだ利用はありません</span>}
             {usage.map((u) => (
               <div key={u.provider} className="flex flex-col gap-1 text-xs">

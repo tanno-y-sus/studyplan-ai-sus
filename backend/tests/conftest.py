@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import os
+
+# 自分の PC の .env（本物の API キー）をテストで読み込まない。app を import する前に設定する
+os.environ["STUDYPLAN_NO_DOTENV"] = "1"
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker

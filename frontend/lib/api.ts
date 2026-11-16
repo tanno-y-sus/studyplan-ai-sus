@@ -128,6 +128,15 @@ export interface Usage {
   limit: number;
 }
 
+export interface AIStatus {
+  provider: "gemini" | "demo";
+  model: string | null;
+  configured: string;
+  reason: string;
+  today_count: number | null;
+  daily_limit: number | null;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,

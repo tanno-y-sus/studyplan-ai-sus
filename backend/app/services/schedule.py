@@ -1,13 +1,14 @@
 """AI によるスケジュール作成と確認（02-4）。
 
 AI が作る → プログラムで確認 → 問題があれば問題点を伝えて作り直し（最大2回）→ それでもだめなら警告付きで返す。
+AI を使えない場合（通信できない・キーが正しくない・無料枠の上限）は、作り直しても同じなのでその場で止める。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.ai.base import AIError, AIProvider
+from app.ai.base import AIError, AIProvider, AIUnavailable
 from app.config import settings
 from app.schemas import AIReschedule, AISchedule, RescheduleContext, ScheduleContext
 from app.services.validator import validate_days
@@ -32,6 +33,8 @@ def generate_with_checks(
     for attempt in range(max_retries + 1):
         try:
             schedule = ai.generate_schedule(ctx)
+        except AIUnavailable:
+            raise
         except AIError as e:
             last = ScheduleResult(schedule=last.schedule, issues=[str(e)], retries=attempt)
             ctx = ctx.model_copy(update={"feedback": [str(e)]})
@@ -66,6 +69,8 @@ def reschedule_with_checks(
     for attempt in range(max_retries + 1):
         try:
             plan = ai.reschedule(ctx)
+        except AIUnavailable:
+            raise
         except AIError as e:
             last = RescheduleResult(plan=last.plan, issues=[str(e)], retries=attempt)
             ctx = ctx.model_copy(update={"feedback": [str(e)]})
