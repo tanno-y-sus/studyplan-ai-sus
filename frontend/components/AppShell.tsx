@@ -4,28 +4,20 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
-import { api, getUserId, setUserId, type User } from "@/lib/api";
+import { api, ROLE_LABEL, type User } from "@/lib/api";
 
 const UserContext = createContext<User | null>(null);
 export const useUser = () => useContext(UserContext);
-
-const ROLE_LABEL = { member: "メンバー", mentor: "育成担当", admin: "管理者" } as const;
 
 export function AppShell({ children, crumb, actions }: { children: ReactNode; crumb: ReactNode; actions?: ReactNode }) {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
-    if (!getUserId()) {
-      router.replace("/login");
-      return;
-    }
+    // ログインしていなければ（Cookie がない・期限切れ）ログイン画面へ
     api<User>("/me")
       .then(setUser)
-      .catch(() => {
-        setUserId(null);
-        router.replace("/login");
-      });
+      .catch(() => router.replace("/login"));
   }, [router]);
 
   if (!user) return <div className="p-10 text-sm text-slate-500">読み込み中…</div>;
@@ -66,6 +58,14 @@ function Sidebar({ user }: { user: User }) {
           <NavItem href="/review" active={pathname === "/review"}>AI提案レビュー</NavItem>
         </>
       )}
+      {user.role === "admin" && (
+        <>
+          <div className="px-3 pb-1.5 pt-4 text-[11px] tracking-wider text-slate-500">管理者</div>
+          <NavItem href="/admin/users" active={pathname === "/admin/users"}>ユーザー管理</NavItem>
+        </>
+      )}
+      <div className="px-3 pb-1.5 pt-4 text-[11px] tracking-wider text-slate-500">アカウント</div>
+      <NavItem href="/settings" active={pathname === "/settings"}>アカウント設定</NavItem>
       <div className="mt-auto flex items-center gap-2.5 border-t border-slate-800 p-3 text-sm">
         <span className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-700 text-sm font-bold text-white">
           {user.name.slice(0, 1)}
@@ -77,12 +77,12 @@ function Sidebar({ user }: { user: User }) {
         </div>
         <button
           className="text-xs text-slate-400 hover:text-white"
-          onClick={() => {
-            setUserId(null);
+          onClick={async () => {
+            await api("/auth/logout", { method: "POST" }).catch(() => undefined);
             router.push("/login");
           }}
         >
-          切替
+          ログアウト
         </button>
       </div>
     </aside>

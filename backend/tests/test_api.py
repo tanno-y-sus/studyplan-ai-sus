@@ -1,4 +1,4 @@
-from tests.conftest import MEMBER, MENTOR
+from tests.conftest import MEMBER, MEMBER2, MENTOR
 
 PLAN = {
     "topic": "パイソン",
@@ -84,11 +84,14 @@ def test_input_validation(client):
 
 def test_other_member_cannot_see_plan(client):
     plan = client.post("/api/plans", json=PLAN, headers=MEMBER).json()
-    assert client.get(f"/api/plans/{plan['id']}", headers={"X-User-Id": "2"}).status_code == 403
+    assert client.get(f"/api/plans/{plan['id']}", headers=MEMBER2).status_code == 403
     assert client.get(f"/api/plans/{plan['id']}", headers=MENTOR).status_code == 200
 
 
 def test_suggest_and_availability(client):
-    assert client.get("/api/topics/suggest?q=ec2").json()[0]["name"] == "AWS（EC2・VPC）"
-    a = client.get("/api/availability?start_date=2026-12-21&end_date=2027-01-08&hours_per_day=2").json()
+    assert client.get("/api/topics/suggest?q=ec2").status_code == 401  # ログインが必要
+    assert client.get("/api/topics/suggest?q=ec2", headers=MEMBER).json()[0]["name"] == "AWS（EC2・VPC）"
+    a = client.get(
+        "/api/availability?start_date=2026-12-21&end_date=2027-01-08&hours_per_day=2", headers=MEMBER
+    ).json()
     assert a["available_days"] == 11 and a["max_hours"] == 22  # 12/29〜1/3 と土日を除く

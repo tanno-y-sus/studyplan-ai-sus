@@ -26,7 +26,6 @@ from app.schemas import (
     TaskUpdate,
     TopicSuggestion,
     UsageOut,
-    UserOut,
 )
 from app.search.router import search_status
 from app.services import plans as plan_service
@@ -69,19 +68,13 @@ def ai_status(db: Session = Depends(get_db), user: User = Depends(current_user))
     return out
 
 
-@router.get("/users", response_model=list[UserOut])
-def list_users(db: Session = Depends(get_db)):
-    return db.scalars(select(User).order_by(User.id)).all()
-
-
-@router.get("/me", response_model=UserOut)
-def me(user: User = Depends(current_user)):
-    return user
-
-
 # ---------------------------------------------------------------- 単元（S03）
 @router.get("/topics/suggest", response_model=list[TopicSuggestion])
-def suggest_topics(q: str = Query(default="", max_length=100), db: Session = Depends(get_db)):
+def suggest_topics(
+    q: str = Query(default="", max_length=100),
+    db: Session = Depends(get_db),
+    _: User = Depends(current_user),
+):
     key = f"%{q.strip().lower()}%"
     topics = db.scalars(
         select(Topic)
@@ -100,7 +93,9 @@ def suggest_topics(q: str = Query(default="", max_length=100), db: Session = Dep
 
 
 @router.get("/topics/level-guides", response_model=list[LevelGuideOut])
-def level_guides(topic: str = Query(default=""), db: Session = Depends(get_db)):
+def level_guides(
+    topic: str = Query(default=""), db: Session = Depends(get_db), _: User = Depends(current_user)
+):
     found = find_topic(db, topic) if topic else None
     if found and found.level_guides:
         return [LevelGuideOut(level=g.level, description=g.description) for g in found.level_guides]
@@ -113,6 +108,7 @@ def availability(
     end_date: dt.date,
     hours_per_day: float,
     excluded_weekdays: str = Query(default="5,6"),
+    _: User = Depends(current_user),
 ):
     if end_date < start_date:
         raise HTTPException(status_code=422, detail="終了日は開始日より後にしてください")

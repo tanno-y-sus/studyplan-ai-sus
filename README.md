@@ -11,7 +11,10 @@
 
 | 画面 | パス | 内容 |
 |---|---|---|
-| S01 ログイン | `/login` | MVP は簡易ログイン（ユーザーを選ぶ）。本番は社内 SSO |
+| S01 ログイン | `/login` | メールアドレスとパスワード |
+| 新規登録 | `/register` | 氏名・メール・パスワード。最初の登録者が管理者 |
+| アカウント設定 | `/settings` | パスワードの変更 |
+| ユーザー管理 | `/admin/users` | 管理者のみ。権限の変更（メンバー・育成担当・管理者）、仮パスワードの発行 |
 | S02 ダッシュボード | `/` | 今日のタスク、達成率、遅れのお知らせ、マイプラン |
 | S03 プラン作成 | `/plans/new` | 単元の入力（候補表示）、レベル（単元別の目安）、期間、学習できる時間 |
 | S05 プラン提案 | `/plans/{id}/proposal` | 教材カード（参考時間と根拠・取得元）、AI が決めた配分、AI の判断、チェック済み表示、週カレンダー |
@@ -26,14 +29,14 @@ backend/   FastAPI + SQLAlchemy 2 + Pydantic v2（Python 3.12+）
   app/ai/        AI の共通インターフェース・デモ AI・Gemini（AI_PROVIDER で切替）
   app/search/    無料検索 API（Tavily・Qiita・YouTube・デモ）と切替（上限に達したら次へ）
   app/services/  単元の正規化 / 教材選定 / 参考時間の読み取り / スケジュール作成と確認 / リスケ
-  data/catalog.json  初期の教材カタログ（Python・AWS（EC2・VPC）・SQL）
+  app/api/auth.py  新規登録・ログイン・ユーザー管理
 frontend/  Next.js 15（App Router, TypeScript, Tailwind CSS）
 ```
 
 処理の流れ（Notion 02_処理概要）：
 
 1. 単元の正規化：別名の辞書（例：パイソン → Python）→ なければ AI。範囲が広すぎる単元（例：AWS）は候補を出して絞り込んでもらう
-2. 教材選定：教材カタログ → なければ無料検索 API で候補を集め、AI がレベルに合うものを選ぶ（「AI提案（未レビュー）」として保存）
+2. 教材選定：教材カタログ（育成担当が承認した教材）→ なければ無料検索 API で候補を集め、AI がレベルに合うものを選ぶ（「AI提案（未レビュー）」として保存）
 3. スケジュール作成：AI が参考時間・順番・配分・日別の予定を作る → `validator.py` で確認 → NG なら問題点を伝えて作り直し（最大2回）
 4. リスケ：未完了のタスクを AI が残りの学習できる日に組み直す → 同じ確認
 
@@ -48,7 +51,9 @@ python3 -m venv .venv
 .venv/bin/uvicorn app.main:app --reload --port 8000
 ```
 
-起動時にテーブル作成と初期データ投入を行います（DB は既定で `backend/studyplan.db` の SQLite）。
+起動時にテーブルを作成します（DB は既定で `backend/studyplan.db` の SQLite）。初期データ（ユーザー・教材）は入りません。
+
+**以前の版（仮のメンバーを選んでログインする版）の `studyplan.db` は使えません。** 起動時に案内が出たら、サーバーを止めて `backend/studyplan.db` を削除し、起動し直してください（データは消えます）。
 API ドキュメント：http://localhost:8000/docs
 
 ### フロントエンド
@@ -59,7 +64,21 @@ npm install
 npm run dev
 ```
 
-http://localhost:3000 を開き、ログイン画面でユーザーを選びます（山田・鈴木＝メンバー、佐藤＝育成担当、管理者）。
+http://localhost:3000 を開き、「新規登録」でアカウントを作ります。
+
+- **最初に登録した人が管理者**になります。以降に登録した人はメンバーです
+- 管理者は「ユーザー管理」で、育成担当・管理者に変更できます（最後の管理者は外せません）
+- パスワードを忘れた人には、管理者が「仮パスワードを発行」します。本人はログイン後に「アカウント設定」で変更します
+
+### ログインの設定（`.env`）
+
+| 設定 | 内容 |
+|---|---|
+| `ALLOWED_EMAIL_DOMAINS` | 新規登録できるメールのドメイン（例：`example.co.jp`。カンマ区切り。空なら制限なし） |
+| `SESSION_DAYS` | ログインしたままにする日数（既定 14） |
+| `COOKIE_SECURE` | https で公開するときは `true` |
+
+パスワードは scrypt で変換した値だけを保存します。ログイン状態は HttpOnly の Cookie で、同じメールアドレスで15分に10回失敗すると一時的にログインできなくなります。
 
 画面からの `/api/*` は、フロントエンドのサーバーがバックエンドに中継します（`next.config.ts` の rewrites）。
 ブラウザは画面と同じ URL だけにアクセスするので、クラウドのプレビューや社内サーバーでもポート 3000 を開ければ動きます。
@@ -136,7 +155,7 @@ YOUTUBE_API_KEY=（発行したキー）
 ## テスト
 
 ```bash
-cd backend && .venv/bin/pytest -q          # 83件：確認ロジック、カレンダー、AI の作り直し、API の一連の流れ、外部 API アダプタ、Gemini 連携
+cd backend && .venv/bin/pytest -q          # 108件：確認ロジック、カレンダー、AI の作り直し、API の一連の流れ、外部 API アダプタ、Gemini 連携、新規登録・ログイン
 cd backend && .venv/bin/ruff check . && .venv/bin/ruff format --check .
 cd frontend && npm run lint && npx tsc --noEmit && npm run build
 ```
@@ -145,6 +164,7 @@ cd frontend && npm run lint && npx tsc --noEmit && npm run build
 
 - S04 スキル診断、社内 SSO、通知（Slack・メール）、カレンダー出力（.ics）、CSV/PDF 出力
 - Claude API のアダプタ（予算がついた場合）、Alembic によるマイグレーション、本番デプロイ
-- 教材カタログの管理画面（現在は `data/catalog.json` と S08 の承認で登録）
+- 教材カタログの管理画面（現在は S08 の承認で登録）
+- メールでのパスワード再設定（現在は管理者が仮パスワードを発行）
 - リスケで期間内に収まらなかったタスクは、適用するとプランから外れます（後回しの一覧として残す改善が必要）
 - デモ AI は決まった手順で結果を作るもので、教材の中身を理解して判断しているわけではありません

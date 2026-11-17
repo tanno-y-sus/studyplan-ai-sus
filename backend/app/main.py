@@ -6,22 +6,38 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import inspect
 
 from app.ai.base import AIUnavailable
 from app.ai.factory import choose_ai
+from app.api.auth import router as auth_router
 from app.api.routes import router
 from app.config import ENV_FILES, settings
-from app.db import Base, SessionLocal, engine
+from app.db import Base, engine
 from app.search.router import search_status
-from app.seed import seed
+
+
+class OldDatabaseError(RuntimeError):
+    pass
+
+
+def check_database(eng=engine) -> None:
+    """以前の版（仮のメンバーで動いていた版）の DB のままなら、作り直しを案内して止める。"""
+    insp = inspect(eng)
+    if "users" in insp.get_table_names():
+        columns = {c["name"] for c in insp.get_columns("users")}
+        if "password_hash" not in columns:
+            raise OldDatabaseError(
+                "以前の版のデータベースです（ログインの仕組みが変わりました）。"
+                "サーバーを止めて backend/studyplan.db を削除し、起動し直してください（データは消えます）"
+            )
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # MVP では起動時にテーブルを作り、初期データを入れる（本番は Alembic のマイグレーションに置き換える）
+    # 起動時にテーブルを作る（本番は Alembic のマイグレーションに置き換える）。初期データは入れない
+    check_database()
     Base.metadata.create_all(engine)
-    with SessionLocal() as db:
-        seed(db)
     log = logging.getLogger("uvicorn.error")
     log.info("設定ファイル: %s", ", ".join(str(p) for p in ENV_FILES) or "なし（.env は読み込んでいません）")
     log.info("AI: %s", choose_ai(settings).reason)
@@ -44,6 +60,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(auth_router, prefix="/api")
 app.include_router(router, prefix="/api")
 
 

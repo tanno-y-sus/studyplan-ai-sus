@@ -43,6 +43,14 @@ class Settings:
         default_factory=lambda: _list(os.getenv("CORS_ORIGINS"), ["http://localhost:3000"])
     )
 
+    # 認証：新規登録できるメールのドメイン（例：example.co.jp。カンマ区切り。空なら制限なし）
+    allowed_email_domains: list[str] = field(
+        default_factory=lambda: [d.lower().lstrip("@") for d in _list(os.getenv("ALLOWED_EMAIL_DOMAINS"), [])]
+    )
+    session_days: int = field(default_factory=lambda: int(os.getenv("SESSION_DAYS", "14")))
+    # https で公開するときは true（Cookie を https のときだけ送る）
+    cookie_secure: bool = field(default_factory=lambda: os.getenv("COOKIE_SECURE", "false").lower() == "true")
+
     # AI: demo | gemini
     ai_provider: str = field(default_factory=lambda: os.getenv("AI_PROVIDER", "demo"))
     gemini_api_key: str | None = field(default_factory=lambda: os.getenv("GEMINI_API_KEY"))

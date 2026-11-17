@@ -147,6 +147,41 @@ class UserOut(BaseModel):
     role: str
 
 
+class AdminUserOut(UserOut):
+    email: str
+    created_at: dt.datetime | None = None
+
+
+class AuthConfigOut(BaseModel):
+    allowed_email_domains: list[str]
+    first_user: bool  # まだ誰も登録していない（次の登録者が管理者になる）
+    min_password: int
+
+
+class RegisterIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    email: str = Field(min_length=3, max_length=200)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class LoginIn(BaseModel):
+    email: str = Field(max_length=200)
+    password: str = Field(max_length=200)
+
+
+class PasswordChangeIn(BaseModel):
+    current_password: str = Field(max_length=200)
+    new_password: str = Field(max_length=200)
+
+
+class RoleUpdateIn(BaseModel):
+    role: Literal["member", "mentor", "admin"]
+
+
+class TemporaryPasswordOut(BaseModel):
+    password: str
+
+
 class TopicSuggestion(BaseModel):
     name: str
     category: str
