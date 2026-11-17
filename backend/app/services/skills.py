@@ -8,7 +8,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.ai.base import AIProvider
-from app.models import Topic, TopicSkill
+from app.models import Topic, TopicArea, TopicSkill
 
 # 目的ごとに、最初から「できるようになりたいこと」にチェックを入れる目安（この level 以下）
 PURPOSE_LEVELS = {"basics": 2, "exam": 3, "work": 4, "other": 0}
@@ -42,3 +42,24 @@ def levels_from_checks(skills: list[TopicSkill], can_do: list[str], goals: list[
     wanted = [level_of[g] for g in goals if g in level_of]
     target = max(wanted) if wanted else current + 1
     return current, max(min(target, 5), current)
+
+
+def exam_areas_for(db: Session, topic: Topic, ai: AIProvider) -> list[TopicArea]:
+    """資格試験の出題範囲。なければ AI に作ってもらい、育成担当の確認待ち（ai_pending）で保存する。"""
+    if not topic.areas:
+        result = ai.exam_areas(topic.name)
+        for i, a in enumerate(result.areas):
+            topic.areas.append(
+                TopicArea(
+                    order=i,
+                    name=a.name.strip(),
+                    description=a.description,
+                    weight=a.weight,
+                    est_hours=a.est_hours,
+                    status="ai_pending",
+                )
+            )
+        if result.syllabus_url and not topic.syllabus_url:
+            topic.syllabus_url = result.syllabus_url
+        db.flush()
+    return list(topic.areas)

@@ -55,7 +55,11 @@ def uses_demo_search(cfg: Settings = settings) -> bool:
 
 
 def search_materials(
-    db: Session, topic: str, providers: list[tuple[object, int]] | None = None, cfg: Settings = settings
+    db: Session,
+    topic: str,
+    providers: list[tuple[object, int]] | None = None,
+    cfg: Settings = settings,
+    exam: bool = False,
 ) -> SearchOutcome:
     outcome = SearchOutcome()
     allowed = set(cfg.allowed_domains)
@@ -63,7 +67,8 @@ def search_materials(
         name = provider.name  # type: ignore[attr-defined]
         try:
             consume(db, name, period_key(provider.period_kind), limit)  # type: ignore[attr-defined]
-            results = provider.search(topic)  # type: ignore[attr-defined]
+            # 資格試験はシラバス・過去問・解説を探す
+            results = provider.search(topic, exam=True) if exam else provider.search(topic)  # type: ignore[attr-defined]
         except (LimitReached, SearchError) as e:
             outcome.skipped.append(f"{name}: {e}")
             continue

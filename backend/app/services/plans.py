@@ -14,7 +14,10 @@ from app.schemas import (
     AINoteOut,
     AITask,
     Allocation,
+    AreaProgress,
     AvailabilityOut,
+    Deadline,
+    ExamArea,
     MaterialInfo,
     MaterialOut,
     PlanCreate,
@@ -36,7 +39,7 @@ from app.services.calendar import available_dates, count_all_days
 from app.services.materials import materials_for_topic
 from app.services.normalize import resolve_topic
 from app.services.schedule import generate_with_checks, reschedule_with_checks
-from app.services.skills import checklist_for, levels_from_checks
+from app.services.skills import checklist_for, exam_areas_for, levels_from_checks
 
 
 def availability(plan_or_data) -> AvailabilityOut:
@@ -85,20 +88,45 @@ def create_plan(db: Session, user: User, data: PlanCreate, ai: AIProvider) -> Pl
     notes: list[str] = []
     seen_topics: set[int] = set()
     for i, item in enumerate(data.topics):
-        topic = resolve_topic(db, item.topic, ai)
+        topic = resolve_topic(db, item.topic, ai, item.kind)
         if topic.id in seen_topics:
             raise ValueError(f"「{topic.name}」が2回入っています")
         seen_topics.add(topic.id)
-        skills = checklist_for(db, topic, ai)
-        current, target = levels_from_checks(skills, item.can_do, item.goals)
+        if item.kind == "exam":
+            # 資格試験：出題範囲を網羅する。レベルのチェックは使わない
+            areas = exam_areas_for(db, topic, ai)
+            exam_date = item.exam_date or data.end_date
+            if not any(d <= exam_date for d in dates):
+                raise ValueError(f"「{topic.name}」の試験日までに学習できる日がありません")
+            if any(a.status != "approved" for a in areas):
+                notes.append(f"「{topic.name}」の出題範囲は AI が作った一覧です（育成担当の確認前）")
+            current, target = 1, 5
+            purpose, purpose_note, can_do, item_goals = "exam", None, [], []
+            area_info = [
+                ExamArea(name=a.name, description=a.description, weight=a.weight, est_hours=a.est_hours)
+                for a in areas
+            ]
+        else:
+            skills = checklist_for(db, topic, ai)
+            current, target = levels_from_checks(skills, item.can_do, item.goals)
+            exam_date = None
+            purpose, purpose_note, can_do, item_goals = (
+                item.purpose,
+                item.purpose_note,
+                item.can_do,
+                item.goals,
+            )
+            area_info = []
         plan_topics.append(
             PlanTopic(
                 topic_id=topic.id,
                 order=i,
-                purpose=item.purpose,
-                purpose_note=item.purpose_note,
-                can_do=item.can_do,
-                goals=item.goals,
+                kind=item.kind,
+                exam_date=exam_date,
+                purpose=purpose,
+                purpose_note=purpose_note,
+                can_do=can_do,
+                goals=item_goals,
                 current_level=current,
                 target_level=target,
             )
@@ -106,14 +134,19 @@ def create_plan(db: Session, user: User, data: PlanCreate, ai: AIProvider) -> Pl
         goals.append(
             TopicGoal(
                 topic=topic.name,
-                purpose=_purpose_text(item.purpose, item.purpose_note),
-                can_do=item.can_do,
-                goals=item.goals,
+                kind=item.kind,
+                exam_date=exam_date,
+                areas=area_info,
+                purpose=_purpose_text(purpose, purpose_note),
+                can_do=can_do,
+                goals=item_goals,
                 current_level=current,
                 target_level=target,
             )
         )
-        found, topic_notes = materials_for_topic(db, topic, current, target, ai, goals=item.goals)
+        found, topic_notes = materials_for_topic(
+            db, topic, current, target, ai, goals=item_goals or None, kind=item.kind
+        )
         materials.extend(found)
         notes.extend(topic_notes)
 
@@ -182,6 +215,7 @@ def _set_tasks(plan: Plan, days: list[tuple[dt.date, list[AITask]]], keep: list[
                     type=t.type,
                     planned_hours=t.hours,
                     material_id=t.material_id,
+                    area=t.area,
                 )
             )
 
@@ -226,9 +260,24 @@ def topics_out(plan: Plan) -> list[PlanTopicOut]:
         tasks = [t for t in plan.tasks if t.type != "buffer" and _task_topic(t) == pt.topic.name]
         planned = sum(t.planned_hours for t in tasks)
         done = sum(t.planned_hours for t in tasks if t.status == "done")
+        areas = []
+        if pt.kind == "exam":
+            for a in pt.topic.areas:
+                mine = [t for t in tasks if t.area == a.name]
+                areas.append(
+                    AreaProgress(
+                        name=a.name,
+                        weight=a.weight,
+                        planned_hours=round(sum(t.planned_hours for t in mine), 2),
+                        done_hours=round(sum(t.planned_hours for t in mine if t.status == "done"), 2),
+                    )
+                )
         out.append(
             PlanTopicOut(
                 name=pt.topic.name,
+                kind=pt.kind,
+                exam_date=pt.exam_date,
+                areas=areas,
                 purpose=pt.purpose,
                 purpose_label=PURPOSE_LABEL.get(pt.purpose, pt.purpose),
                 purpose_note=pt.purpose_note,
@@ -321,8 +370,19 @@ def reschedule_preview(plan: Plan, ai: AIProvider, today: dt.date | None = None)
         hours_per_day=plan.hours_per_day,
         available_dates=available_dates(max(today, plan.start_date), plan.end_date, plan.excluded_weekdays),
         pending_tasks=[
-            AITask(type=t.type, title=t.title, hours=t.planned_hours, material_id=t.material_id)
+            AITask(type=t.type, title=t.title, hours=t.planned_hours, material_id=t.material_id, area=t.area)
             for t in pending
+        ],
+        deadlines=[
+            Deadline(
+                topic=pt.topic.name,
+                date=pt.exam_date,
+                material_ids=[
+                    pm.material_id for pm in plan.plan_materials if pm.material.topic_id == pt.topic_id
+                ],
+            )
+            for pt in plan.plan_topics
+            if pt.kind == "exam" and pt.exam_date
         ],
     )
     result = reschedule_with_checks(ai, ctx)
@@ -419,6 +479,7 @@ def update_task(db: Session, plan: Plan, task: Task, data: TaskUpdate) -> TaskUp
                     type=task.type,
                     planned_hours=shortfall,
                     material_id=task.material_id,
+                    area=task.area,
                     remainder_of_id=task.id,
                 )
                 plan.tasks.append(remainder)

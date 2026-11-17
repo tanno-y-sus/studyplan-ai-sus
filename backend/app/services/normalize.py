@@ -32,12 +32,17 @@ def find_topic(db: Session, text: str) -> Topic | None:
     return alias.topic if alias else None
 
 
-def resolve_topic(db: Session, text: str, ai: AIProvider) -> Topic:
-    """入力を既存の単元に結び付ける。なければ AI で正規化して新しい単元を作る。"""
+def resolve_topic(db: Session, text: str, ai: AIProvider, kind: str = "skill") -> Topic:
+    """入力を既存の単元に結び付ける。なければ AI で正規化して新しい単元を作る。
+
+    資格試験（kind=exam）は絞り込みをせず、試験全体を1つの単元にする。
+    """
     found = find_topic(db, text)
     if found:
         return found
-    norm = ai.normalize_topic(text)
+    norm = ai.normalize_topic(text, kind)
+    if kind == "exam":
+        norm = norm.model_copy(update={"too_broad": False})
     if not norm.is_it:
         raise TopicError("このアプリは IT 技術の単元のみ対応しています")
     if norm.too_broad:

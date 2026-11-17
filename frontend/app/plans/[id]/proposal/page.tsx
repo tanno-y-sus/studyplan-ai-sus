@@ -82,10 +82,16 @@ function Proposal({ plan }: { plan: Plan }) {
               <span key={t.name} className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs">
                 {multi && <span className={`h-2 w-2 rounded-full ${topicColor(plan, t.name)}`} />}
                 <b>{t.name}</b>
-                <span className="text-slate-500">
-                  {t.purpose_label}
-                  {t.purpose_note && `（${t.purpose_note}）`} ・ 目安 Lv{t.current_level}→{t.target_level}
-                </span>
+                {t.kind === "exam" ? (
+                  <span className="text-slate-500">
+                    資格試験 ・ 試験日 {t.exam_date ? fmtDate(t.exam_date) : "―"} ・ 出題範囲 {t.areas.length} 分野
+                  </span>
+                ) : (
+                  <span className="text-slate-500">
+                    {t.purpose_label}
+                    {t.purpose_note && `（${t.purpose_note}）`} ・ 目安 Lv{t.current_level}→{t.target_level}
+                  </span>
+                )}
               </span>
             ))}
           </div>
@@ -110,6 +116,21 @@ function Proposal({ plan }: { plan: Plan }) {
           </ul>
         </Alert>
       )}
+      {plan.topics
+        .filter((t) => t.kind === "exam")
+        .map((t) => {
+          const missing = t.areas.filter((a) => a.planned_hours <= 0);
+          return missing.length === 0 ? (
+            <Alert key={t.name} tone="green" title={`✓ ${t.name}：出題範囲 ${t.areas.length} 分野をすべて含みます`}>
+              {t.areas.map((a) => `${a.name} ${a.planned_hours}h`).join("・")}
+              {t.exam_date && `。試験日（${fmtDate(t.exam_date)}）より後には予定を入れていません`}
+            </Alert>
+          ) : (
+            <Alert key={t.name} tone="orange" title={`${t.name}：スケジュールに入っていない分野があります`}>
+              {missing.map((a) => a.name).join("・")}
+            </Alert>
+          );
+        })}
       {plan.warnings.map((w) => (
         <Alert key={w} tone="purple">{w}</Alert>
       ))}

@@ -42,6 +42,7 @@ class Topic(Base):
     category: Mapped[str] = mapped_column(String(50), default="その他")
     prerequisites: Mapped[list] = mapped_column(JSON, default=list)
     source: Mapped[str] = mapped_column(String(20), default="catalog")  # catalog / ai
+    syllabus_url: Mapped[str | None] = mapped_column(String(500), nullable=True)  # 資格試験の公式シラバスなど
 
     aliases: Mapped[list[TopicAlias]] = relationship(back_populates="topic", cascade="all, delete-orphan")
     level_guides: Mapped[list[LevelGuide]] = relationship(
@@ -50,6 +51,9 @@ class Topic(Base):
     materials: Mapped[list[Material]] = relationship(back_populates="topic", cascade="all, delete-orphan")
     skills: Mapped[list[TopicSkill]] = relationship(
         back_populates="topic", cascade="all, delete-orphan", order_by="TopicSkill.order"
+    )
+    areas: Mapped[list[TopicArea]] = relationship(
+        back_populates="topic", cascade="all, delete-orphan", order_by="TopicArea.order"
     )
 
 
@@ -63,6 +67,21 @@ class TopicSkill(Base):
     text: Mapped[str] = mapped_column(String(300))
     level: Mapped[int] = mapped_column(Integer)
     topic: Mapped[Topic] = relationship(back_populates="skills")
+
+
+class TopicArea(Base):
+    """資格試験の出題範囲の分野（AI が作り、育成担当が S08 で確認・修正して承認する）。"""
+
+    __tablename__ = "topic_areas"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    topic_id: Mapped[int] = mapped_column(ForeignKey("topics.id"))
+    order: Mapped[int] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text, default="")
+    weight: Mapped[float] = mapped_column(Float)  # 出題の比重（%）
+    est_hours: Mapped[float] = mapped_column(Float)  # 目安の学習時間
+    status: Mapped[str] = mapped_column(String(20), default="ai_pending")  # ai_pending / approved
+    topic: Mapped[Topic] = relationship(back_populates="areas")
 
 
 class TopicAlias(Base):
@@ -155,6 +174,8 @@ class PlanTopic(Base):
     plan_id: Mapped[int] = mapped_column(ForeignKey("plans.id"))
     topic_id: Mapped[int] = mapped_column(ForeignKey("topics.id"))
     order: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(10), default="skill")  # skill（技術・ツール）/ exam（資格試験）
+    exam_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     purpose: Mapped[str] = mapped_column(String(20))  # exam / work / basics / other
     purpose_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     can_do: Mapped[list] = mapped_column(JSON, default=list)  # 今できること
@@ -205,6 +226,7 @@ class Task(Base):
     order: Mapped[int] = mapped_column(Integer, default=0)
     title: Mapped[str] = mapped_column(String(300))
     type: Mapped[str] = mapped_column(String(20))  # learn / review / exercise / video / buffer
+    area: Mapped[str | None] = mapped_column(String(200), nullable=True)  # 資格試験の分野
     planned_hours: Mapped[float] = mapped_column(Float)
     status: Mapped[str] = mapped_column(String(20), default="todo")  # todo / done / skipped
     actual_hours: Mapped[float | None] = mapped_column(Float, nullable=True)

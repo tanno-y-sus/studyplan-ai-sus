@@ -56,6 +56,7 @@ def materials_for_topic(
     ai: AIProvider,
     cfg: Settings = settings,
     goals: list[str] | None = None,
+    kind: str = "skill",
 ) -> tuple[list[Material], list[str]]:
     """プランに使う教材と、利用者への注意文を返す。"""
     if not uses_demo_search(cfg):
@@ -68,11 +69,13 @@ def materials_for_topic(
     if pending:  # 以前 AI が探した結果を使い回す（検索回数の節約）
         return pending, [f"「{topic.name}」は AI が探した教材です（育成担当のレビュー前）"]
 
-    outcome = search_materials(db, topic.name, cfg=cfg)
+    outcome = search_materials(db, topic.name, cfg=cfg, exam=kind == "exam")
     notes = [f"「{topic.name}」は AI が探した教材です（育成担当のレビュー前）"]
     if outcome.skipped:
         notes.append("一部の検索 API を使えませんでした：" + " / ".join(outcome.skipped[:3]))
-    selection = ai.select_materials(topic.name, current_level, target_level, outcome.candidates, goals=goals)
+    selection = ai.select_materials(
+        topic.name, current_level, target_level, outcome.candidates, goals=goals, kind=kind
+    )
 
     created: list[Material] = []
     for choice in selection.chosen:

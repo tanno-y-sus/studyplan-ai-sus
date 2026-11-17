@@ -30,6 +30,8 @@ def check_database(eng=engine) -> None:
         old = True  # 仮のメンバーを選んでログインしていた版
     if "plans" in tables and "topic_id" in {c["name"] for c in insp.get_columns("plans")}:
         old = True  # 1つのプランに単元が1つだった版
+    if "plan_topics" in tables and "kind" not in {c["name"] for c in insp.get_columns("plan_topics")}:
+        old = True  # 資格試験に対応する前の版
     if old:
         raise OldDatabaseError(
             "以前の版のデータベースです（データの形が変わりました）。"

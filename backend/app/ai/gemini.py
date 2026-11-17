@@ -19,6 +19,7 @@ from app.ai.base import AIError, AIUnavailable
 from app.schemas import (
     AIReschedule,
     AISchedule,
+    ExamSyllabus,
     MaterialSelection,
     RescheduleContext,
     ScheduleContext,
@@ -90,7 +91,15 @@ class GeminiAI:
             raise AIError("Gemini API の回答を読み取れませんでした") from e
 
     # ------------------------------------------------------------------ 各処理
-    def normalize_topic(self, text: str) -> TopicNormalization:
+    def normalize_topic(self, text: str, kind: str = "skill") -> TopicNormalization:
+        if kind == "exam":
+            prompt = (
+                "次の入力は、社員が対策したい資格試験の名前です。試験の正式名称（例：基本情報技術者試験）にそろえ、"
+                "category は「資格試験」、IT関連の資格かどうかを is_it に答えてください。"
+                "資格試験は試験全体を1つの単元として扱うので、too_broad は必ず false にしてください。\n"
+                f"入力：{text}"
+            )
+            return self._ask(prompt, TopicNormalization)
         prompt = (
             "次の入力は、社員が学びたいと入力した単元名です。正式な名称にそろえ、カテゴリ（言語／データベース／"
             "クラウド／インフラ／フレームワーク／その他IT）、IT技術かどうか、前提となる単元を答えてください。"
@@ -98,6 +107,17 @@ class GeminiAI:
             f"入力：{text}"
         )
         return self._ask(prompt, TopicNormalization)
+
+    def exam_areas(self, topic: str) -> ExamSyllabus:
+        prompt = (
+            f"資格試験「{topic}」の出題範囲を、公式のシラバス・出題範囲の分け方に沿って6〜15個の分野にしてください。\n"
+            "- name：分野名（例：基本情報技術者試験なら「データベース」「ネットワーク」「セキュリティ」など）\n"
+            "- description：その分野で学ぶ内容を1文で\n"
+            "- weight：出題の比重（%。合計がおよそ100）\n"
+            "- est_hours：その分野を一通り学ぶ目安の時間（その試験の合格に必要な学習時間の一般的な目安から配分）\n"
+            "- syllabus_url：公式のシラバスや出題範囲のページの URL（確実に分かる場合だけ。不明なら null）"
+        )
+        return self._ask(prompt, ExamSyllabus)
 
     def skill_checklist(self, topic: str, category: str) -> SkillChecklist:
         prompt = (
@@ -117,6 +137,7 @@ class GeminiAI:
         target_level: int,
         candidates: list[SearchCandidate],
         goals: list[str] | None = None,
+        kind: str = "skill",
     ) -> MaterialSelection:
         listing = "\n".join(
             f"[{i}] 種類={c.type} 取得元={c.source} タイトル={c.title} URL={c.url} "
@@ -130,6 +151,12 @@ class GeminiAI:
             "記事や動画に参考時間の記載・長さがあれば reference_hours と reference_basis に根拠を書いてください。"
             "最後に、学んだ内容を使う実践課題を1つ作ってください。\n"
             + (f"できるようになりたいこと：{' / '.join(goals)}\n" if goals else "")
+            + (
+                "これは資格試験の対策です。公式シラバス・過去問の解説サイト・解説動画を優先して選び、"
+                "実践課題の代わりに「模擬試験（過去問を本番と同じ時間で解く）」を作ってください。\n"
+                if kind == "exam"
+                else ""
+            )
             + "レベル：1=未経験 2=概念を説明できる 3=手順どおり使える 4=自力で構成・トラブル対応できる 5=設計・他者に教えられる\n"
             f"# 候補\n{listing}"
         )
@@ -150,6 +177,9 @@ class GeminiAI:
             "4. 学習・復習・予備の時間を配分する（目安：学習75%・復習10%・予備15%。単元に合わせて調整してよい）\n"
             "5. available_dates の日だけを使い、各日の合計が hours_per_day を超えないように日別のタスクを作る。"
             "復習（type=review）は学習の1〜3日後に入れる。教材ごとに material_id を付ける\n"
+            "6. kind=exam（資格試験）の単元は、areas（出題範囲）の全分野を weight（比重）に応じて必ず入れ、"
+            "各タスクの area に分野名を areas の name と同じ文字列で入れる。その単元のタスクは exam_date（試験日）より後に"
+            "入れない。試験日前の2〜3割の期間に、過去問演習・模擬試験（type=exercise）と弱い分野の復習を入れる\n"
             "時間は 0.25 時間単位にしてください。\n"
             + _feedback(ctx.feedback)
             + f"# 学習条件と教材\n{ctx.model_dump_json()}"
@@ -160,7 +190,9 @@ class GeminiAI:
         prompt = (
             "学習が遅れています。未完了のタスク（pending_tasks）を、today 以降の available_dates に組み直してください。"
             "各日の合計は hours_per_day を超えないこと。予備（buffer）は使ってよい。"
-            "収まらないものは dropped に理由と一緒に書き、advice に本人へのひとことを書いてください。\n"
+            "収まらないものは dropped に理由と一緒に書き、advice に本人へのひとことを書いてください。"
+            "deadlines にある教材（資格試験）のタスクは、その date（試験日）より後に入れないでください。"
+            "タスクの area はそのまま残してください。\n"
             + _feedback(ctx.feedback)
             + f"# 状況\n{ctx.model_dump_json()}"
         )

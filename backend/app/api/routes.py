@@ -11,11 +11,13 @@ from app.ai.factory import choose_ai
 from app.api.deps import ai_provider, current_user, require_role
 from app.config import settings
 from app.db import get_db
-from app.models import ApiUsage, Material, Plan, Task, Topic, TopicAlias, User
+from app.models import ApiUsage, Material, Plan, Task, Topic, TopicAlias, TopicArea, User
 from app.schemas import (
     AIStatusOut,
     AvailabilityOut,
     ChecklistOut,
+    ExamAreaOut,
+    ExamAreasUpdate,
     PlanCreate,
     PlanOut,
     PlanSummary,
@@ -32,7 +34,7 @@ from app.search.router import search_status
 from app.services import plans as plan_service
 from app.services.calendar import available_dates, count_all_days
 from app.services.normalize import TopicError, resolve_topic
-from app.services.skills import PURPOSE_LEVELS, checklist_for
+from app.services.skills import PURPOSE_LEVELS, checklist_for, exam_areas_for
 from app.services.usage import latest_usage, period_key
 
 router = APIRouter()
@@ -97,14 +99,18 @@ def suggest_topics(
 @router.get("/topics/checklist", response_model=ChecklistOut)
 def topic_checklist(
     topic: str = Query(min_length=1, max_length=200),
+    kind: str = Query(default="skill", pattern="^(skill|exam)$"),
     db: Session = Depends(get_db),
     _: User = Depends(current_user),
     ai: AIProvider = Depends(ai_provider),
 ):
-    """単元名をそろえ、「できること」チェックリストを返す（なければ AI が作って保存する）。"""
+    """単元名をそろえ、技術なら「できること」、資格試験なら出題範囲を返す（なければ AI が作って保存する）。"""
     try:
-        found = resolve_topic(db, topic, ai)
-        skills = checklist_for(db, found, ai)
+        found = resolve_topic(db, topic, ai, kind)
+        if kind == "exam":
+            areas = exam_areas_for(db, found, ai)
+        else:
+            skills = checklist_for(db, found, ai)
     except TopicError as e:
         db.rollback()
         raise HTTPException(status_code=422, detail={"message": str(e), "suggestions": e.suggestions}) from e
@@ -115,11 +121,26 @@ def topic_checklist(
         db.rollback()
         raise HTTPException(status_code=422, detail={"message": str(e), "suggestions": []}) from e
     db.commit()
+    if kind == "exam":
+        return ChecklistOut(
+            topic=found.name,
+            category=found.category,
+            kind="exam",
+            areas=[_area_out(a) for a in areas],
+            syllabus_url=found.syllabus_url,
+            areas_reviewed=all(a.status == "approved" for a in areas),
+        )
     return ChecklistOut(
         topic=found.name,
         category=found.category,
         items=[SkillItem(text=s.text, level=s.level) for s in skills],
         purpose_levels=PURPOSE_LEVELS,
+    )
+
+
+def _area_out(a: TopicArea) -> ExamAreaOut:
+    return ExamAreaOut(
+        name=a.name, description=a.description, weight=a.weight, est_hours=a.est_hours, status=a.status
     )
 
 
@@ -252,6 +273,7 @@ def reschedule_apply(
 def mentor_members(db: Session = Depends(get_db), user: User = Depends(require_role("mentor", "admin"))):
     members = db.scalars(select(User).where(User.role == "member").order_by(User.id)).all()
     pending = db.scalar(select(func.count(Material.id)).where(Material.status == "ai_pending")) or 0
+    pending += len(_pending_exam_topics(db))
     rows = []
     for m in members:
         plans = db.scalars(select(Plan).where(Plan.user_id == m.id).order_by(Plan.created_at.desc())).all()
@@ -283,6 +305,60 @@ def _material_dict(m: Material) -> dict:
             for s in m.sections
         ],
         "comment": m.review_comment,
+    }
+
+
+def _pending_exam_topics(db: Session) -> list[Topic]:
+    return db.scalars(
+        select(Topic).where(Topic.areas.any(TopicArea.status == "ai_pending")).order_by(Topic.name)
+    ).all()
+
+
+@router.get("/review/exam-areas")
+def review_exam_areas(db: Session = Depends(get_db), user: User = Depends(require_role("mentor", "admin"))):
+    """確認待ちの資格試験の出題範囲（AI が作った一覧）。"""
+    return [
+        {
+            "topic_id": t.id,
+            "topic": t.name,
+            "syllabus_url": t.syllabus_url,
+            "areas": [_area_out(a).model_dump() for a in t.areas],
+        }
+        for t in _pending_exam_topics(db)
+    ]
+
+
+@router.put("/review/topics/{topic_id}/areas")
+def update_exam_areas(
+    topic_id: int,
+    data: ExamAreasUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("mentor", "admin")),
+):
+    """育成担当が出題範囲を直して承認する（分野の追加・削除・名前・比重・目安時間）。作成済みのプランには影響しない。"""
+    topic = db.get(Topic, topic_id)
+    if topic is None:
+        raise HTTPException(status_code=404, detail="単元が見つかりません")
+    names = [a.name.strip() for a in data.areas]
+    if any(not n for n in names) or len(set(names)) != len(names):
+        raise HTTPException(status_code=422, detail="分野名が空か、同じ分野名が重複しています")
+    topic.areas = [
+        TopicArea(
+            order=i,
+            name=a.name.strip(),
+            description=a.description,
+            weight=a.weight,
+            est_hours=a.est_hours,
+            status="approved",
+        )
+        for i, a in enumerate(data.areas)
+    ]
+    topic.syllabus_url = data.syllabus_url or None
+    db.commit()
+    return {
+        "topic_id": topic.id,
+        "topic": topic.name,
+        "areas": [_area_out(a).model_dump() for a in topic.areas],
     }
 
 

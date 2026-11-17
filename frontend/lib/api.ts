@@ -35,6 +35,7 @@ export interface Task {
   memo: string | null;
   material_id: number | null;
   topic: string | null;
+  area: string | null;
   remainder_of_id: number | null;
 }
 
@@ -76,6 +77,9 @@ export interface Progress {
 
 export interface PlanTopic {
   name: string;
+  kind: "skill" | "exam";
+  exam_date: string | null;
+  areas: { name: string; weight: number; planned_hours: number; done_hours: number }[];
   purpose: string;
   purpose_label: string;
   purpose_note: string | null;
@@ -138,7 +142,7 @@ export interface ReschedulePreview {
   advice: string;
   check_passed: boolean;
   check_issues: string[];
-  days: { date: string; tasks: { type: string; title: string; hours: number; material_id: number | null }[] }[];
+  days: { date: string; tasks: { type: string; title: string; hours: number; material_id: number | null; area?: string | null }[] }[];
 }
 
 export interface ReviewMaterial {
@@ -218,7 +222,19 @@ export function topicColor(plan: { topics: { name: string }[] }, name: string | 
 
 /** 単元ごとのレベルの目安（例：Java Lv2→4 ・ SQL Lv1→3） */
 export function levelSummary(topics: PlanTopic[]): string {
-  return topics.map((t) => `${t.name} Lv${t.current_level}→${t.target_level}`).join(" ・ ");
+  return topics
+    .map((t) =>
+      t.kind === "exam" ? `${t.name}（試験 ${t.exam_date ? fmtDate(t.exam_date, false) : "―"}）` : `${t.name} Lv${t.current_level}→${t.target_level}`,
+    )
+    .join(" ・ ");
+}
+
+export interface ExamArea {
+  name: string;
+  description: string;
+  weight: number;
+  est_hours: number;
+  status?: string;
 }
 
 export const TYPE_LABEL: Record<string, string> = {

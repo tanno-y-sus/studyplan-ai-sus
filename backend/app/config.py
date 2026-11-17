@@ -93,6 +93,13 @@ class Settings:
                 "cloud.google.com",
                 "www.typescriptlang.org",
                 "git-scm.com",
+                # 資格試験（公式・過去問サイト）
+                "www.ipa.go.jp",
+                "www.fe-siken.com",
+                "www.ap-siken.com",
+                "www.sg-siken.com",
+                "www3.jitec.ipa.go.jp",
+                "aws.amazon.com",
                 "roadmap.sh",
                 "qiita.com",
                 "zenn.dev",
