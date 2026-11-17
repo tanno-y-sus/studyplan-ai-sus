@@ -1,24 +1,23 @@
-"""初期データ（ユーザーと教材カタログ）の投入。すでにデータがあれば何もしない。"""
+"""テスト用の教材カタログ（Python・AWS（EC2・VPC）・SQL）を DB に入れる。
+
+アプリには初期データを入れない（教材は検索と AI で探し、育成担当が承認したものがカタログになる）。
+テストでは「カタログに教材がある単元」の動きを確かめるために使う。
+"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import LevelGuide, Material, MaterialSection, Topic, TopicAlias, User
+from app.models import LevelGuide, Material, MaterialSection, Topic, TopicAlias
 
-CATALOG = Path(__file__).resolve().parent.parent / "data" / "catalog.json"
+CATALOG = Path(__file__).resolve().parent / "fixtures" / "catalog.json"
 
 
-def seed(db: Session, path: Path = CATALOG) -> None:
-    if db.scalar(select(User.id).limit(1)) is not None:
-        return
+def load_catalog(db: Session, path: Path = CATALOG) -> None:
     data = json.loads(path.read_text(encoding="utf-8"))
-    for u in data["users"]:
-        db.add(User(**u))
     for t in data["topics"]:
         topic = Topic(name=t["name"], category=t["category"], source="catalog")
         topic.aliases = [TopicAlias(alias=a) for a in t.get("aliases", [])]

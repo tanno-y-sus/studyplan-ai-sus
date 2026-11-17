@@ -1,4 +1,5 @@
-// バックエンド（FastAPI）とのやり取り。MVP の認証は簡易（選んだユーザーの ID を X-User-Id で送る）。
+// バックエンド（FastAPI）とのやり取り。
+// ログイン状態は HttpOnly の Cookie（サーバーが発行。画面の JavaScript からは読めない）で、同じオリジンなので自動で送られる。
 
 // 既定は同じオリジンの /api（next.config.ts の rewrites でバックエンドへ中継）
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "/api";
@@ -9,6 +10,19 @@ export interface User {
   name: string;
   role: Role;
 }
+
+export interface AdminUser extends User {
+  email: string;
+  created_at: string | null;
+}
+
+export interface AuthConfig {
+  allowed_email_domains: string[];
+  first_user: boolean;
+  min_password: number;
+}
+
+export const ROLE_LABEL: Record<Role, string> = { member: "メンバー", mentor: "育成担当", admin: "管理者" };
 
 export interface Task {
   id: number;
@@ -149,32 +163,10 @@ export class ApiError extends Error {
   }
 }
 
-const USER_KEY = "studyplan.userId";
-
-export function getUserId(): number | null {
-  try {
-    const v = localStorage.getItem(USER_KEY);
-    return v ? Number(v) : null;
-  } catch {
-    return null;
-  }
-}
-
-export function setUserId(id: number | null) {
-  try {
-    if (id === null) localStorage.removeItem(USER_KEY);
-    else localStorage.setItem(USER_KEY, String(id));
-  } catch {
-    /* 保存できない環境では毎回ログイン画面に戻る */
-  }
-}
-
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
-  const uid = getUserId();
-  if (uid) headers.set("X-User-Id", String(uid));
-  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  const res = await fetch(`${API_BASE}${path}`, { credentials: "same-origin", ...init, headers });
   if (!res.ok) {
     let message = `エラーが発生しました（${res.status}）`;
     let suggestions: string[] = [];
