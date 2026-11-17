@@ -8,10 +8,21 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Iterable
+from dataclasses import dataclass, field
 
 from app.schemas import AIDay
 
 EPS = 1e-6
+
+
+@dataclass
+class ExamRule:
+    """資格試験の単元の確認条件：全分野を網羅し、試験日より後に予定を入れず、過去問・模擬試験を入れる。"""
+
+    topic: str
+    exam_date: dt.date
+    areas: list[str]
+    material_ids: set[int] = field(default_factory=set)
 
 
 def validate_days(
@@ -22,6 +33,7 @@ def validate_days(
     available: Iterable[dt.date],
     hours_per_day: float,
     required_material_ids: Iterable[int] = (),
+    exam_rules: Iterable[ExamRule] = (),
 ) -> list[str]:
     """問題点を日本語の文のリストで返す（空なら合格）。この文はそのまま AI への作り直し依頼に使う。"""
     issues: list[str] = []
@@ -61,4 +73,38 @@ def validate_days(
     if missing:
         issues.append(f"教材 ID {missing} がスケジュールに入っていません")
 
+    for rule in exam_rules:
+        issues.extend(_check_exam(days, rule))
+
+    return issues
+
+
+def _check_exam(days: list[AIDay], rule: ExamRule) -> list[str]:
+    issues: list[str] = []
+    covered: set[str] = set()
+    late: list[str] = []
+    has_practice = False
+    for day in days:
+        for task in day.tasks:
+            mine = task.material_id in rule.material_ids or (task.area in rule.areas)
+            if not mine or task.type == "buffer":
+                continue
+            if task.area:
+                covered.add(task.area)
+            if task.type == "exercise":
+                has_practice = True
+            if day.date > rule.exam_date:
+                late.append(f"{day.date}「{task.title}」")
+    not_covered = [a for a in rule.areas if a not in covered]
+    if not_covered:
+        issues.append(
+            f"「{rule.topic}」の出題範囲のうち {'・'.join(not_covered)} がスケジュールに入っていません"
+            "（全分野を網羅し、タスクの area に分野名を入れてください）"
+        )
+    if late:
+        issues.append(
+            f"「{rule.topic}」の試験日（{rule.exam_date}）より後に予定があります：{'、'.join(late[:5])}"
+        )
+    if not has_practice:
+        issues.append(f"「{rule.topic}」に過去問演習・模擬試験（type=exercise）が入っていません")
     return issues

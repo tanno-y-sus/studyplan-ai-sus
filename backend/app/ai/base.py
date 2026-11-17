@@ -7,6 +7,7 @@ from typing import Protocol
 from app.schemas import (
     AIReschedule,
     AISchedule,
+    ExamSyllabus,
     MaterialSelection,
     RescheduleContext,
     ScheduleContext,
@@ -34,8 +35,12 @@ class AILimitReached(AIUnavailable):
 class AIProvider(Protocol):
     name: str
 
-    def normalize_topic(self, text: str) -> TopicNormalization:
+    def normalize_topic(self, text: str, kind: str = "skill") -> TopicNormalization:
         """入力された単元名をそろえ、IT 技術かどうか・前提単元などを返す。"""
+        ...
+
+    def exam_areas(self, topic: str) -> ExamSyllabus:
+        """資格試験の出題範囲（分野・比重・目安時間・公式シラバスの URL）を作る。"""
         ...
 
     def skill_checklist(self, topic: str, category: str) -> SkillChecklist:
@@ -49,6 +54,7 @@ class AIProvider(Protocol):
         target_level: int,
         candidates: list[SearchCandidate],
         goals: list[str] | None = None,
+        kind: str = "skill",
     ) -> MaterialSelection:
         """検索 API で集めた候補から、レベルに合う教材を選び、実践課題を作る。"""
         ...

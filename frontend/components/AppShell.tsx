@@ -31,7 +31,7 @@ export function AppShell({ children, crumb, actions }: { children: ReactNode; cr
     <UserContext.Provider value={user}>
       <div className="flex min-h-screen bg-[#F5F7FB]">
         {/* 幅が広いときは左に固定、狭いとき（スマホなど）はメニューボタンで開く */}
-        <div className="hidden md:block">
+        <div className="sticky top-0 hidden h-screen shrink-0 self-start md:block">
           <Sidebar user={user} />
         </div>
         {menuOpen && (

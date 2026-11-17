@@ -209,3 +209,13 @@ def test_single_topic_database_is_detected(tmp_path):
         conn.execute(text("CREATE TABLE plans (id INTEGER PRIMARY KEY, topic_id INTEGER)"))
     with pytest.raises(OldDatabaseError):
         check_database(eng)
+
+
+def test_pre_exam_database_is_detected(tmp_path):
+    eng = create_engine(f"sqlite:///{tmp_path / 'v3.db'}")
+    with eng.begin() as conn:
+        conn.execute(text("CREATE TABLE users (id INTEGER PRIMARY KEY, password_hash TEXT)"))
+        conn.execute(text("CREATE TABLE plans (id INTEGER PRIMARY KEY)"))
+        conn.execute(text("CREATE TABLE plan_topics (id INTEGER PRIMARY KEY, plan_id INTEGER)"))
+    with pytest.raises(OldDatabaseError):
+        check_database(eng)

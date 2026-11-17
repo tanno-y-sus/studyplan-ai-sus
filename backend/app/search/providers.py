@@ -32,9 +32,33 @@ class DemoSearch:
     name = "demo"
     period_kind = "day"
 
-    def search(self, topic: str) -> list[SearchCandidate]:
+    def search(self, topic: str, exam: bool = False) -> list[SearchCandidate]:
         slug = re.sub(r"[^a-z0-9]+", "-", topic.lower()).strip("-") or "topic"
         base = f"https://example.com/demo/{slug}"
+        if exam:
+            return [
+                SearchCandidate(
+                    title=f"{topic} 公式シラバス（デモ）",
+                    url=f"{base}/syllabus",
+                    source="demo",
+                    type="official_doc",
+                    snippet="出題範囲（シラバス）のデモ候補",
+                ),
+                SearchCandidate(
+                    title=f"{topic} 過去問解説（デモ記事）",
+                    url=f"{base}/kakomon",
+                    source="demo",
+                    type="article",
+                    snippet="過去問1回分の解説。所要時間 約60分",
+                ),
+                SearchCandidate(
+                    title=f"{topic} 試験対策講座（デモ動画）",
+                    url=f"{base}/video",
+                    source="demo",
+                    type="video",
+                    duration_minutes=60,
+                ),
+            ]
         return [
             SearchCandidate(
                 title=f"{topic} 公式ドキュメント（デモ）",
@@ -70,9 +94,11 @@ class TavilySearch:
         self.domains = [d for d in allowed_domains if "youtube" not in d]
         self.client = client or httpx.Client(timeout=30)
 
-    def search(self, topic: str) -> list[SearchCandidate]:
+    def search(self, topic: str, exam: bool = False) -> list[SearchCandidate]:
         body = {
-            "query": f"{topic} 公式ドキュメント チュートリアル 入門",
+            "query": f"{topic} シラバス 出題範囲 過去問 解説"
+            if exam
+            else f"{topic} 公式ドキュメント チュートリアル 入門",
             "search_depth": "basic",
             "max_results": 8,
             "include_domains": self.domains,
@@ -105,9 +131,10 @@ class QiitaSearch:
         self.token = token
         self.client = client or httpx.Client(timeout=30)
 
-    def search(self, topic: str) -> list[SearchCandidate]:
+    def search(self, topic: str, exam: bool = False) -> list[SearchCandidate]:
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
-        params = {"query": f"title:{topic} stocks:>20", "per_page": 5}
+        query = f"title:{topic} 対策 stocks:>10" if exam else f"title:{topic} stocks:>20"
+        params = {"query": query, "per_page": 5}
         try:
             res = self.client.get(self.URL, params=params, headers=headers)
             res.raise_for_status()
@@ -137,14 +164,14 @@ class YouTubeSearch:
         self.api_key = api_key
         self.client = client or httpx.Client(timeout=30)
 
-    def search(self, topic: str) -> list[SearchCandidate]:
+    def search(self, topic: str, exam: bool = False) -> list[SearchCandidate]:
         try:
             res = self.client.get(
                 self.SEARCH_URL,
                 params={
                     "part": "snippet",
                     "type": "video",
-                    "q": f"{topic} 入門",
+                    "q": f"{topic} 解説 対策" if exam else f"{topic} 入門",
                     "maxResults": 5,
                     "relevanceLanguage": "ja",
                     "videoDuration": "medium",

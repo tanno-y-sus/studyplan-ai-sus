@@ -85,7 +85,7 @@ function Detail({ plan, onTaskUpdated }: { plan: Plan; onTaskUpdated: (r: TaskUp
         <Kpi label="遅れ（今日まで）" value={`${p.delay_hours}h`} tone={p.delay_hours > 0 ? "text-orange-700" : ""} />
         <Kpi label="残りの予備時間" value={`${p.buffer_left_hours}h`} />
       </div>
-      {multi && (
+      {(multi || plan.topics.some((t) => t.kind === "exam")) && (
         <Card className="flex flex-col gap-3">
           <h2 className="font-bold">単元ごとの進み具合</h2>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -101,6 +101,23 @@ function Detail({ plan, onTaskUpdated }: { plan: Plan; onTaskUpdated: (r: TaskUp
                   </span>
                 </div>
                 <Bar percent={t.percent} />
+                {t.kind === "exam" && (
+                  <div className="mt-1 flex flex-col gap-1 rounded-lg bg-slate-50 p-2">
+                    <span className="text-[11px] text-slate-500">
+                      試験日 {t.exam_date ? fmtDate(t.exam_date) : "―"} ・ 分野ごと
+                    </span>
+                    {t.areas.map((a) => {
+                      const pct = a.planned_hours ? Math.round((a.done_hours / a.planned_hours) * 100) : 0;
+                      return (
+                        <div key={a.name} className="flex items-center gap-2 text-[11px]">
+                          <span className="min-w-0 flex-1 truncate" title={a.name}>{a.name}</span>
+                          <span className="w-16 shrink-0"><Bar percent={pct} color={pct >= 100 ? "bg-green-700" : "bg-blue-600"} /></span>
+                          <span className="w-8 shrink-0 text-right text-slate-500">{pct}%</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -180,7 +197,10 @@ function TaskTable({ plan, today, onUpdated }: { plan: Plan; today: string; onUp
                   <td className={`px-3 py-2.5 ${done ? "text-slate-400 line-through" : ""}`}>
                     <span className="flex items-center gap-1.5">
                       {multi && t.topic && <span className={`h-2 w-2 shrink-0 rounded-full ${topicColor(plan, t.topic)}`} title={t.topic} />}
-                      {t.title}
+                      <span>
+                        {t.title}
+                        {t.area && t.area !== t.title && <span className="block text-[11px] text-slate-500">分野：{t.area}</span>}
+                      </span>
                     </span>
                   </td>
                   <td className="px-3 py-2.5"><Badge tone={TONE[t.type]}>{TASK_LABEL[t.type]}</Badge></td>

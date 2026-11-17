@@ -48,7 +48,7 @@ def test_real_search_replaces_old_demo_materials(client, db_session, monkeypatch
     _make_demo_plan(client)
     calls = []
 
-    def fake_search(db, topic, providers=None, cfg=None):
+    def fake_search(db, topic, providers=None, cfg=None, exam=False):
         calls.append(topic)
         return SearchOutcome(candidates=REAL, used=["tavily", "qiita", "youtube"])
 

@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 TaskType = Literal["learn", "review", "exercise", "video", "buffer"]
+TopicKind = Literal["skill", "exam"]
 Purpose = Literal["exam", "work", "basics", "other"]
 PURPOSE_LABEL = {"exam": "資格を取る", "work": "業務で使う", "basics": "基礎を知る", "other": "その他"}
 
@@ -36,10 +37,32 @@ class MaterialInfo(BaseModel):
     sections: list[SectionInfo] = Field(default_factory=list)
 
 
+class ExamArea(BaseModel):
+    """資格試験の出題範囲の1分野。"""
+
+    name: str
+    description: str = ""
+    weight: float = Field(gt=0, le=100)  # 出題の比重（%）
+    est_hours: float = Field(gt=0, le=500)  # 目安の学習時間
+
+
+class ExamSyllabus(BaseModel):
+    """AI が作る資格試験の出題範囲。"""
+
+    areas: list[ExamArea] = Field(min_length=3, max_length=20)
+    syllabus_url: str | None = None  # 公式シラバスなど（分かれば）
+
+
 class TopicGoal(BaseModel):
-    """単元ごとの目的・今できること・できるようになりたいこと（AI に渡す。個人情報は含めない）。"""
+    """単元ごとの目的・今できること・できるようになりたいこと（AI に渡す。個人情報は含めない）。
+
+    資格試験（kind=exam）のときは、試験日と出題範囲（areas）を渡し、全分野を網羅させる。
+    """
 
     topic: str
+    kind: TopicKind = "skill"
+    exam_date: dt.date | None = None
+    areas: list[ExamArea] = Field(default_factory=list)
     purpose: str  # 資格を取る／業務で使う／基礎を知る／その他（＋メモ）
     can_do: list[str] = Field(default_factory=list)
     goals: list[str] = Field(default_factory=list)
@@ -64,6 +87,7 @@ class AITask(BaseModel):
     title: str
     hours: float
     material_id: int | None = None
+    area: str | None = None  # 資格試験の分野名（出題範囲の name と同じ文字列）
 
 
 class AIDay(BaseModel):
@@ -106,6 +130,14 @@ class AISchedule(BaseModel):
     days: list[AIDay]
 
 
+class Deadline(BaseModel):
+    """リスケで守る締め切り（資格試験の試験日）。この教材のタスクは date より後に入れない。"""
+
+    topic: str
+    date: dt.date
+    material_ids: list[int]
+
+
 class RescheduleContext(BaseModel):
     topic: str
     today: dt.date
@@ -113,6 +145,7 @@ class RescheduleContext(BaseModel):
     hours_per_day: float
     available_dates: list[dt.date]
     pending_tasks: list[AITask]
+    deadlines: list[Deadline] = Field(default_factory=list)
     feedback: list[str] = Field(default_factory=list)
 
 
@@ -217,16 +250,31 @@ class TopicSuggestion(BaseModel):
     in_catalog: bool
 
 
+class ExamAreaOut(ExamArea):
+    status: str = "ai_pending"
+
+
 class ChecklistOut(BaseModel):
     topic: str  # そろえた単元名
     category: str
-    items: list[SkillItem]
+    kind: TopicKind = "skill"
+    items: list[SkillItem] = Field(default_factory=list)  # 技術の単元
     # 目的ごとに最初からチェックを入れる「できるようになりたいこと」の目安（この level 以下）
-    purpose_levels: dict[str, int]
+    purpose_levels: dict[str, int] = Field(default_factory=dict)
+    areas: list[ExamAreaOut] = Field(default_factory=list)  # 資格試験の出題範囲
+    syllabus_url: str | None = None
+    areas_reviewed: bool = False
+
+
+class ExamAreasUpdate(BaseModel):
+    areas: list[ExamArea] = Field(min_length=1, max_length=30)
+    syllabus_url: str | None = Field(default=None, max_length=500)
 
 
 class TopicGoalIn(BaseModel):
     topic: str = Field(min_length=1, max_length=200)
+    kind: TopicKind = "skill"
+    exam_date: dt.date | None = None  # 資格試験の試験日（未指定ならプランの終了日）
     purpose: Purpose = "work"
     purpose_note: str | None = Field(default=None, max_length=300)
     can_do: list[str] = Field(default_factory=list, max_length=20)
@@ -234,7 +282,7 @@ class TopicGoalIn(BaseModel):
 
     @model_validator(mode="after")
     def _check(self) -> TopicGoalIn:
-        if not self.goals:
+        if self.kind == "skill" and not self.goals:
             raise ValueError(f"「{self.topic}」のできるようになりたいことを1つ以上選んでください")
         return self
 
@@ -253,6 +301,11 @@ class PlanCreate(BaseModel):
             raise ValueError("同じ単元が2回入っています")
         if self.end_date <= self.start_date:
             raise ValueError("終了日は開始日より後にしてください")
+        for t in self.topics:
+            if t.kind == "exam" and t.exam_date and not (self.start_date < t.exam_date <= self.end_date):
+                raise ValueError(
+                    f"「{t.topic}」の試験日はプランの期間内（開始日の翌日〜終了日）にしてください"
+                )
         if any(w < 0 or w > 6 for w in self.excluded_weekdays):
             raise ValueError("学習しない曜日の指定が正しくありません")
         if (self.end_date - self.start_date).days > 366:
@@ -277,6 +330,7 @@ class TaskOut(BaseModel):
     actual_hours: float | None
     memo: str | None
     material_id: int | None
+    area: str | None = None
     topic: str | None = None  # どの単元のタスクか（教材から）
     remainder_of_id: int | None = None
 
@@ -322,8 +376,18 @@ class AINoteOut(BaseModel):
     retries: int
 
 
+class AreaProgress(BaseModel):
+    name: str
+    weight: float
+    planned_hours: float
+    done_hours: float
+
+
 class PlanTopicOut(BaseModel):
     name: str
+    kind: str = "skill"
+    exam_date: dt.date | None = None
+    areas: list[AreaProgress] = Field(default_factory=list)  # 資格試験の分野ごとの時間と進み具合
     purpose: str
     purpose_label: str
     purpose_note: str | None

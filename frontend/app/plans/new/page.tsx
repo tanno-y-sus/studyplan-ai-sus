@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { AIStatusNote } from "@/components/AIStatusNote";
 import { AppShell } from "@/components/AppShell";
 import { Alert, Badge, Button, Card, Spinner } from "@/components/ui";
-import { api, ApiError, type Plan } from "@/lib/api";
+import { api, ApiError, type ExamArea, type Plan } from "@/lib/api";
 
 interface Suggestion {
   name: string;
@@ -27,10 +27,15 @@ interface SkillItem {
 interface Checklist {
   topic: string;
   category: string;
+  kind: Kind;
   items: SkillItem[];
   purpose_levels: Record<Purpose, number>;
+  areas: ExamArea[];
+  syllabus_url: string | null;
+  areas_reviewed: boolean;
 }
 type Purpose = "exam" | "work" | "basics" | "other";
+type Kind = "skill" | "exam";
 
 const PURPOSES: { value: Purpose; label: string }[] = [
   { value: "work", label: "業務で使う" },
@@ -44,6 +49,8 @@ const WEEKDAYS = ["月", "火", "水", "木", "金", "土", "日"];
 /** 単元1つ分の入力 */
 interface TopicDraft {
   key: number;
+  kind: Kind;
+  examDate: string; // 空ならプランの終了日
   input: string;
   checklist: Checklist | null;
   loading: boolean;
@@ -55,7 +62,7 @@ interface TopicDraft {
 }
 
 function newDraft(key: number): TopicDraft {
-  return { key, input: "", checklist: null, loading: false, error: null, purpose: "work", note: "", canDo: [], goals: [] };
+  return { key, kind: "skill", examDate: "", input: "", checklist: null, loading: false, error: null, purpose: "work", note: "", canDo: [], goals: [] };
 }
 
 /** 目的に合わせて、最初からチェックを入れる「できるようになりたいこと」 */
@@ -117,9 +124,10 @@ function NewPlanForm() {
 
   const confirmTopic = async (key: number, text: string) => {
     if (!text.trim()) return;
+    const kind = topics.find((t) => t.key === key)?.kind ?? "skill";
     update(key, { input: text, loading: true, error: null, checklist: null });
     try {
-      const c = await api<Checklist>(`/topics/checklist?topic=${encodeURIComponent(text.trim())}`);
+      const c = await api<Checklist>(`/topics/checklist?topic=${encodeURIComponent(text.trim())}&kind=${kind}`);
       setTopics((list) => {
         if (list.some((t) => t.key !== key && t.checklist?.topic === c.topic)) {
           return list.map((t) =>
@@ -137,7 +145,8 @@ function NewPlanForm() {
     }
   };
 
-  const ready = topics.every((t) => t.checklist && t.goals.length > 0);
+  const examDateOk = (t: TopicDraft) => !t.examDate || (t.examDate > start && t.examDate <= end);
+  const ready = topics.every((t) => t.checklist && (t.kind === "exam" ? examDateOk(t) : t.goals.length > 0));
 
   const submit = async () => {
     setSubmitting(true);
@@ -148,7 +157,9 @@ function NewPlanForm() {
         body: JSON.stringify({
           topics: topics.map((t) => ({
             topic: t.checklist?.topic ?? t.input,
-            purpose: t.purpose,
+            kind: t.kind,
+            exam_date: t.kind === "exam" ? t.examDate || null : null,
+            purpose: t.kind === "exam" ? "exam" : t.purpose,
             purpose_note: t.purpose === "other" ? t.note || null : null,
             can_do: t.canDo,
             goals: t.goals,
@@ -174,6 +185,8 @@ function NewPlanForm() {
             key={t.key}
             index={i}
             draft={t}
+            planStart={start}
+            planEnd={end}
             canRemove={topics.length > 1}
             onChange={(patch) => update(t.key, patch)}
             onConfirm={(text) => confirmTopic(t.key, text)}
@@ -260,7 +273,11 @@ function NewPlanForm() {
             AI に教材とスケジュールを提案してもらう
           </Button>
         )}
-        {!ready && <span className="text-xs text-slate-500">各単元の「決定」と、できるようになりたいことのチェック（1つ以上）が必要です</span>}
+        {!ready && (
+          <span className="text-xs text-slate-500">
+            各単元の「決定」が必要です（技術の単元は、できるようになりたいことのチェックも1つ以上。資格試験の試験日はプランの期間内）
+          </span>
+        )}
         <AIStatusNote />
       </div>
     </div>
@@ -270,6 +287,8 @@ function NewPlanForm() {
 function TopicCard({
   index,
   draft,
+  planStart,
+  planEnd,
   canRemove,
   onChange,
   onConfirm,
@@ -277,6 +296,8 @@ function TopicCard({
 }: {
   index: number;
   draft: TopicDraft;
+  planStart: string;
+  planEnd: string;
   canRemove: boolean;
   onChange: (patch: Partial<TopicDraft>) => void;
   onConfirm: (text: string) => void;
@@ -304,7 +325,7 @@ function TopicCard({
         <div className="flex gap-1">
           {c && (
             <Button variant="ghost" className="h-8 px-2" onClick={() => onChange({ checklist: null, canDo: [], goals: [] })}>
-              単元を変える
+              {draft.kind === "exam" ? "試験を変える" : "単元を変える"}
             </Button>
           )}
           {canRemove && (
@@ -317,7 +338,31 @@ function TopicCard({
 
       {!c && (
         <div className="flex flex-col gap-1.5">
-          <span className="text-sm font-bold">学習したい単元（IT技術）</span>
+          <span className="text-sm font-bold">何のための学習ですか？</span>
+          <div className="grid grid-cols-2 gap-2">
+            {(
+              [
+                ["skill", "技術・ツールを学ぶ", "業務で使う言語・クラウド・ツールなど"],
+                ["exam", "資格試験の対策", "出題範囲をすべて網羅するスケジュール"],
+              ] as const
+            ).map(([k, label, sub]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => onChange({ kind: k, error: null })}
+                className={`flex flex-col items-start rounded-lg px-3 py-2.5 text-left ${draft.kind === k ? "border-2 border-blue-600 bg-blue-50" : "border border-slate-300 bg-white"}`}
+              >
+                <b className="text-sm">{label}</b>
+                <span className="text-[11px] text-slate-500">{sub}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!c && (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-sm font-bold">{draft.kind === "exam" ? "資格試験の名前" : "学習したい単元（IT技術）"}</span>
           <div className="flex gap-2">
             <div className="relative min-w-0 flex-1">
               <input
@@ -326,7 +371,7 @@ function TopicCard({
                 onFocus={() => setShowSuggest(true)}
                 onBlur={() => setTimeout(() => setShowSuggest(false), 150)}
                 onKeyDown={(e) => e.key === "Enter" && onConfirm(draft.input)}
-                placeholder="例：Java、SQL、AWS（EC2・VPC）、Docker、React …"
+                placeholder={draft.kind === "exam" ? "例：基本情報技術者試験、AWS 認定ソリューションアーキテクト …" : "例：Java、SQL、AWS（EC2・VPC）、Docker、React …"}
                 className="h-11 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-2 focus:border-blue-600"
               />
               {showSuggest && suggestions.length > 0 && (
@@ -351,7 +396,11 @@ function TopicCard({
               決定
             </Button>
           </div>
-          <span className="text-xs text-slate-500">決定すると、この単元の「できること」の一覧を表示します（初めての単元は AI が作ります）</span>
+          <span className="text-xs text-slate-500">
+            {draft.kind === "exam"
+              ? "決定すると、試験の出題範囲（分野）の一覧を表示します。試験全体を1つの単元として、全分野を網羅するスケジュールを作ります"
+              : "決定すると、この単元の「できること」の一覧を表示します（初めての単元は AI が作ります）"}
+          </span>
           {draft.loading && <Spinner label="単元を確認しています…" />}
           {draft.error && (
             <Alert tone="orange" title={draft.error.message}>
@@ -369,7 +418,11 @@ function TopicCard({
         </div>
       )}
 
-      {c && (
+      {c && c.kind === "exam" && (
+        <ExamDetail checklist={c} examDate={draft.examDate} planStart={planStart} planEnd={planEnd} onDate={(v) => onChange({ examDate: v })} />
+      )}
+
+      {c && c.kind !== "exam" && (
         <>
           <div className="flex flex-col gap-1.5">
             <span className="text-sm font-bold">学ぶ目的</span>
@@ -444,6 +497,77 @@ function TopicCard({
         </>
       )}
     </Card>
+  );
+}
+
+function ExamDetail({
+  checklist: c,
+  examDate,
+  planStart,
+  planEnd,
+  onDate,
+}: {
+  checklist: Checklist;
+  examDate: string;
+  planStart: string;
+  planEnd: string;
+  onDate: (v: string) => void;
+}) {
+  const total = c.areas.reduce((s, a) => s + a.est_hours, 0);
+  const bad = examDate !== "" && !(examDate > planStart && examDate <= planEnd);
+  return (
+    <>
+      <label className="flex flex-col gap-1.5">
+        <span className="text-sm font-bold">試験日</span>
+        <input
+          type="date"
+          value={examDate}
+          min={planStart}
+          max={planEnd}
+          onChange={(e) => onDate(e.target.value)}
+          className="h-11 rounded-lg border border-slate-300 px-3 text-sm sm:w-60"
+        />
+        <span className={`text-xs ${bad ? "text-orange-700" : "text-slate-500"}`}>
+          {bad ? "試験日はプランの期間内（開始日の翌日〜終了日）にしてください" : "空欄ならプランの終了日を試験日にします。試験日より後には、この試験の予定を入れません"}
+        </span>
+      </label>
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <span className="text-sm font-bold">出題範囲（{c.areas.length} 分野・すべてスケジュールに入れます）</span>
+          <span className="text-xs text-slate-500">目安 合計 {Math.round(total * 10) / 10}h</span>
+        </div>
+        {c.areas_reviewed ? (
+          <Alert tone="green" title="育成担当が確認済みの出題範囲です" />
+        ) : (
+          <Alert tone="purple" title="AI が作った一覧です（育成担当の確認前）">
+            最新のシラバスとずれていることがあります。育成担当が「AI提案レビュー」で確認・修正します
+          </Alert>
+        )}
+        {c.syllabus_url && (
+          <a href={c.syllabus_url} target="_blank" rel="noreferrer" className="text-xs font-bold text-blue-600 hover:underline">
+            公式のシラバス・出題範囲を見る ↗
+          </a>
+        )}
+        <div className="overflow-hidden rounded-lg border border-slate-200">
+          <div className="grid grid-cols-[1fr_56px_56px] bg-slate-50 px-3 py-2 text-[11px] font-bold text-slate-500">
+            <span>分野</span>
+            <span className="text-right">比重</span>
+            <span className="text-right">目安</span>
+          </div>
+          {c.areas.map((a) => (
+            <div key={a.name} className="grid grid-cols-[1fr_56px_56px] items-center border-t border-slate-100 px-3 py-2 text-sm">
+              <span className="min-w-0">
+                {a.name}
+                {a.description && <span className="block text-[11px] text-slate-500">{a.description}</span>}
+              </span>
+              <span className="text-right text-xs text-slate-600">{a.weight}%</span>
+              <span className="text-right text-xs text-slate-600">{a.est_hours}h</span>
+            </div>
+          ))}
+        </div>
+        <span className="text-xs text-slate-500">試験日前の期間に、過去問演習と模擬試験も AI が入れます</span>
+      </div>
+    </>
   );
 }
 

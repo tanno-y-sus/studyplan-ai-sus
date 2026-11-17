@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AIStatusNote } from "@/components/AIStatusNote";
 import { AppShell } from "@/components/AppShell";
+import { ExamAreasReview } from "@/components/ExamAreasReview";
 import { Alert, Badge, Bar, Button, Card } from "@/components/ui";
 import { api, SOURCE_LABEL, TYPE_LABEL, type ReviewMaterial, type Usage } from "@/lib/api";
 
@@ -50,7 +51,8 @@ export default function ReviewPage() {
   };
 
   return (
-    <AppShell crumb={<><b className="text-slate-900">AI提案レビュー</b> ／ レビュー待ち {topics.size} 件</>}>
+    <AppShell crumb={<><b className="text-slate-900">AI提案レビュー</b> ／ 教材のレビュー待ち {topics.size} 件</>}>
+      <ExamAreasReview />
       <div className="flex flex-col gap-5 lg:flex-row">
         <div className="flex w-full flex-col gap-3.5 lg:w-[330px] lg:shrink-0">
           <Card className="flex flex-col gap-2 p-3">
