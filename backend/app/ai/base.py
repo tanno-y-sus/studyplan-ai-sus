@@ -11,6 +11,7 @@ from app.schemas import (
     RescheduleContext,
     ScheduleContext,
     SearchCandidate,
+    SkillChecklist,
     TopicNormalization,
 )
 
@@ -37,8 +38,17 @@ class AIProvider(Protocol):
         """入力された単元名をそろえ、IT 技術かどうか・前提単元などを返す。"""
         ...
 
+    def skill_checklist(self, topic: str, category: str) -> SkillChecklist:
+        """単元の「できること」を易しい順に5〜8個作る（現在・目標のチェックに使う）。"""
+        ...
+
     def select_materials(
-        self, topic: str, current_level: int, target_level: int, candidates: list[SearchCandidate]
+        self,
+        topic: str,
+        current_level: int,
+        target_level: int,
+        candidates: list[SearchCandidate],
+        goals: list[str] | None = None,
     ) -> MaterialSelection:
         """検索 API で集めた候補から、レベルに合う教材を選び、実践課題を作る。"""
         ...

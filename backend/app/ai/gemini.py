@@ -23,6 +23,7 @@ from app.schemas import (
     RescheduleContext,
     ScheduleContext,
     SearchCandidate,
+    SkillChecklist,
     TopicNormalization,
 )
 
@@ -98,8 +99,24 @@ class GeminiAI:
         )
         return self._ask(prompt, TopicNormalization)
 
+    def skill_checklist(self, topic: str, category: str) -> SkillChecklist:
+        prompt = (
+            f"IT技術の単元「{topic}」（カテゴリ：{category}）について、学習者が自分のレベルを確かめるための"
+            "「できること」を、易しい順に6〜8個作ってください。\n"
+            "- 各項目は「〜できる」で終わる、具体的で確かめやすい1文（40文字程度まで）にする\n"
+            "- 例（Java）：「変数・if文・for文を使って簡単なプログラムを書ける」「クラスとメソッドを自分で定義できる」\n"
+            "- level は 1〜5 の目安：1=未経験でも分かる基本、2=概念を説明できる、3=手順どおりに使える、"
+            "4=自力で構成・トラブル対応できる、5=設計・他の人に教えられる。1〜5 をまんべんなく含める"
+        )
+        return self._ask(prompt, SkillChecklist)
+
     def select_materials(
-        self, topic: str, current_level: int, target_level: int, candidates: list[SearchCandidate]
+        self,
+        topic: str,
+        current_level: int,
+        target_level: int,
+        candidates: list[SearchCandidate],
+        goals: list[str] | None = None,
     ) -> MaterialSelection:
         listing = "\n".join(
             f"[{i}] 種類={c.type} 取得元={c.source} タイトル={c.title} URL={c.url} "
@@ -112,14 +129,20 @@ class GeminiAI:
             "公式ドキュメントには学ぶ節（sections）を目次に沿って提案し、各節の想定時間と対応レベルを付けてください。"
             "記事や動画に参考時間の記載・長さがあれば reference_hours と reference_basis に根拠を書いてください。"
             "最後に、学んだ内容を使う実践課題を1つ作ってください。\n"
-            "レベル：1=未経験 2=概念を説明できる 3=手順どおり使える 4=自力で構成・トラブル対応できる 5=設計・他者に教えられる\n"
+            + (f"できるようになりたいこと：{' / '.join(goals)}\n" if goals else "")
+            + "レベル：1=未経験 2=概念を説明できる 3=手順どおり使える 4=自力で構成・トラブル対応できる 5=設計・他者に教えられる\n"
             f"# 候補\n{listing}"
         )
         return self._ask(prompt, MaterialSelection)
 
     def generate_schedule(self, ctx: ScheduleContext) -> AISchedule:
         prompt = (
-            "次の学習条件と教材から、学習スケジュールを作ってください。\n"
+            "次の学習条件と教材から、学習スケジュールを作ってください。"
+            "topics には単元ごとの目的・今できること（can_do）・できるようになりたいこと（goals）が入っています。"
+            "教材の topic でどの単元の教材かが分かります。\n"
+            "0. 単元が複数あるときは、前提関係（例：SQL を先に知っていると Python のデータ分析が楽）や目的・分量から、"
+            "学ぶ順番と、1つずつ進めるか並行して進めるかを決め、strategy に理由と一緒に書く。"
+            "単元ごとの合計時間を topic_allocation に入れる\n"
             "1. 教材ごとに参考時間を決める（ページの記載や動画の長さがあれば使い、なければ節の数と分量から推定し、"
             "根拠を reference_basis に書く）\n"
             "2. 学ぶ順番と重点を決め、理由を order_reason と focus に書く\n"

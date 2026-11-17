@@ -22,15 +22,19 @@ class OldDatabaseError(RuntimeError):
 
 
 def check_database(eng=engine) -> None:
-    """以前の版（仮のメンバーで動いていた版）の DB のままなら、作り直しを案内して止める。"""
+    """以前の版の DB のままなら、作り直しを案内して止める（Alembic は未導入のため、形が変わったら作り直す）。"""
     insp = inspect(eng)
-    if "users" in insp.get_table_names():
-        columns = {c["name"] for c in insp.get_columns("users")}
-        if "password_hash" not in columns:
-            raise OldDatabaseError(
-                "以前の版のデータベースです（ログインの仕組みが変わりました）。"
-                "サーバーを止めて backend/studyplan.db を削除し、起動し直してください（データは消えます）"
-            )
+    tables = set(insp.get_table_names())
+    old = False
+    if "users" in tables and "password_hash" not in {c["name"] for c in insp.get_columns("users")}:
+        old = True  # 仮のメンバーを選んでログインしていた版
+    if "plans" in tables and "topic_id" in {c["name"] for c in insp.get_columns("plans")}:
+        old = True  # 1つのプランに単元が1つだった版
+    if old:
+        raise OldDatabaseError(
+            "以前の版のデータベースです（データの形が変わりました）。"
+            "サーバーを止めて backend/studyplan.db を削除し、起動し直してください（データは消えます）"
+        )
 
 
 @asynccontextmanager

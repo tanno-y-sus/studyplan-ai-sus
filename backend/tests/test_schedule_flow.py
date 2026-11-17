@@ -13,6 +13,7 @@ from app.schemas import (
     RescheduleContext,
     ScheduleContext,
     SectionInfo,
+    TopicGoal,
 )
 from app.services.calendar import available_dates
 from app.services.schedule import generate_with_checks, reschedule_with_checks
@@ -21,9 +22,7 @@ from app.services.validator import validate_days
 
 def _ctx(start, end, hpd, cur=2, tgt=4, excluded=(5, 6)):
     return ScheduleContext(
-        topic="Python",
-        current_level=cur,
-        target_level=tgt,
+        topics=[TopicGoal(topic="Python", purpose="業務で使う", current_level=cur, target_level=tgt)],
         start_date=start,
         end_date=end,
         hours_per_day=hpd,
@@ -31,6 +30,7 @@ def _ctx(start, end, hpd, cur=2, tgt=4, excluded=(5, 6)):
         materials=[
             MaterialInfo(
                 material_id=1,
+                topic="Python",
                 title="公式",
                 type="official_doc",
                 sections=[
@@ -41,9 +41,14 @@ def _ctx(start, end, hpd, cur=2, tgt=4, excluded=(5, 6)):
                 ],
             ),
             MaterialInfo(
-                material_id=2, title="動画", type="video", reference_hours=1.5, reference_basis="動画の長さ"
+                material_id=2,
+                topic="Python",
+                title="動画",
+                type="video",
+                reference_hours=1.5,
+                reference_basis="動画の長さ",
             ),
-            MaterialInfo(material_id=3, title="課題", type="exercise", reference_hours=4),
+            MaterialInfo(material_id=3, topic="Python", title="課題", type="exercise", reference_hours=4),
         ],
     )
 

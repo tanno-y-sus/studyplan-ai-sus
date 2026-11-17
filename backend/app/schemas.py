@@ -8,6 +8,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 TaskType = Literal["learn", "review", "exercise", "video", "buffer"]
+Purpose = Literal["exam", "work", "basics", "other"]
+PURPOSE_LABEL = {"exam": "資格を取る", "work": "業務で使う", "basics": "基礎を知る", "other": "その他"}
 
 
 # ---------------------------------------------------------------- AI の入出力
@@ -24,6 +26,7 @@ class MaterialInfo(BaseModel):
     """AI に渡す教材情報。氏名などの個人情報は含めない。"""
 
     material_id: int
+    topic: str  # どの単元の教材か
     title: str
     type: str
     url: str | None = None
@@ -33,13 +36,21 @@ class MaterialInfo(BaseModel):
     sections: list[SectionInfo] = Field(default_factory=list)
 
 
-class ScheduleContext(BaseModel):
-    """スケジュール作成のために AI に渡す情報（02-4「AI に渡す情報」）。"""
+class TopicGoal(BaseModel):
+    """単元ごとの目的・今できること・できるようになりたいこと（AI に渡す。個人情報は含めない）。"""
 
     topic: str
-    current_level: int
+    purpose: str  # 資格を取る／業務で使う／基礎を知る／その他（＋メモ）
+    can_do: list[str] = Field(default_factory=list)
+    goals: list[str] = Field(default_factory=list)
+    current_level: int  # チェックから計算した目安（1〜5）
     target_level: int
-    purpose: str | None = None
+
+
+class ScheduleContext(BaseModel):
+    """スケジュール作成のために AI に渡す情報（02-4「AI に渡す情報」）。複数の単元をまとめて渡す。"""
+
+    topics: list[TopicGoal]
     start_date: dt.date
     end_date: dt.date
     hours_per_day: float
@@ -77,6 +88,11 @@ class Allocation(BaseModel):
     buffer: float
 
 
+class TopicAllocation(BaseModel):
+    topic: str
+    hours: float
+
+
 class AISchedule(BaseModel):
     """AI が返すスケジュール。この形式に沿っているかも確認対象。"""
 
@@ -84,6 +100,8 @@ class AISchedule(BaseModel):
     allocation: Allocation
     order_reason: str
     focus: str
+    strategy: str = ""  # 複数単元の進め方（例：SQL を先に固めてから Python と並行）
+    topic_allocation: list[TopicAllocation] = Field(default_factory=list)
     dropped: list[AIDropped] = Field(default_factory=list)
     days: list[AIDay]
 
@@ -102,6 +120,17 @@ class AIReschedule(BaseModel):
     days: list[AIDay]
     dropped: list[AIDropped] = Field(default_factory=list)
     advice: str
+
+
+class SkillItem(BaseModel):
+    text: str  # 「〜できる」の形の具体的な文
+    level: int = Field(ge=1, le=5)  # 1=未経験でも分かる … 5=設計・他者に教えられる
+
+
+class SkillChecklist(BaseModel):
+    """単元ごとの「できること」チェックリスト（易しい順に5〜8個）。"""
+
+    items: list[SkillItem] = Field(min_length=3, max_length=10)
 
 
 class TopicNormalization(BaseModel):
@@ -188,16 +217,30 @@ class TopicSuggestion(BaseModel):
     in_catalog: bool
 
 
-class LevelGuideOut(BaseModel):
-    level: int
-    description: str
+class ChecklistOut(BaseModel):
+    topic: str  # そろえた単元名
+    category: str
+    items: list[SkillItem]
+    # 目的ごとに最初からチェックを入れる「できるようになりたいこと」の目安（この level 以下）
+    purpose_levels: dict[str, int]
+
+
+class TopicGoalIn(BaseModel):
+    topic: str = Field(min_length=1, max_length=200)
+    purpose: Purpose = "work"
+    purpose_note: str | None = Field(default=None, max_length=300)
+    can_do: list[str] = Field(default_factory=list, max_length=20)
+    goals: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def _check(self) -> TopicGoalIn:
+        if not self.goals:
+            raise ValueError(f"「{self.topic}」のできるようになりたいことを1つ以上選んでください")
+        return self
 
 
 class PlanCreate(BaseModel):
-    topic: str = Field(min_length=1, max_length=200)
-    purpose: str | None = Field(default=None, max_length=500)
-    current_level: int = Field(ge=1, le=5)
-    target_level: int = Field(ge=1, le=5)
+    topics: list[TopicGoalIn] = Field(min_length=1, max_length=5)
     start_date: dt.date
     end_date: dt.date
     hours_per_day: float = Field(ge=0.5, le=8)
@@ -205,8 +248,9 @@ class PlanCreate(BaseModel):
 
     @model_validator(mode="after")
     def _check(self) -> PlanCreate:
-        if self.target_level < self.current_level:
-            raise ValueError("目標レベルは現在のレベル以上にしてください")
+        names = [t.topic.strip().lower() for t in self.topics]
+        if len(set(names)) != len(names):
+            raise ValueError("同じ単元が2回入っています")
         if self.end_date <= self.start_date:
             raise ValueError("終了日は開始日より後にしてください")
         if any(w < 0 or w > 6 for w in self.excluded_weekdays):
@@ -233,6 +277,15 @@ class TaskOut(BaseModel):
     actual_hours: float | None
     memo: str | None
     material_id: int | None
+    topic: str | None = None  # どの単元のタスクか（教材から）
+    remainder_of_id: int | None = None
+
+
+class TaskUpdateOut(BaseModel):
+    task: TaskOut
+    # 実績が予定より少なかったときに作った「残り」のタスク（画面はこのあとリスケ案を作る）
+    remainder: TaskOut | None = None
+    shortfall_hours: float = 0
 
 
 class TaskUpdate(BaseModel):
@@ -243,6 +296,7 @@ class TaskUpdate(BaseModel):
 
 class MaterialOut(BaseModel):
     id: int
+    topic: str
     title: str
     url: str | None
     type: str
@@ -261,19 +315,33 @@ class AINoteOut(BaseModel):
     focus: str
     dropped: list[AIDropped]
     allocation: Allocation | None
+    strategy: str = ""
+    topic_allocation: list[TopicAllocation] = Field(default_factory=list)
     check_passed: bool
     check_issues: list[str]
     retries: int
+
+
+class PlanTopicOut(BaseModel):
+    name: str
+    purpose: str
+    purpose_label: str
+    purpose_note: str | None
+    can_do: list[str]
+    goals: list[str]
+    current_level: int
+    target_level: int
+    planned_hours: float = 0
+    done_hours: float = 0
+    percent: int = 0
 
 
 class PlanOut(BaseModel):
     id: int
     user_id: int
     user_name: str
-    topic: str
-    purpose: str | None
-    current_level: int
-    target_level: int
+    topic: str  # 単元名をつなげたもの（例：Java ＋ SQL）
+    topics: list[PlanTopicOut]
     start_date: dt.date
     end_date: dt.date
     hours_per_day: float
@@ -290,8 +358,7 @@ class PlanOut(BaseModel):
 class PlanSummary(BaseModel):
     id: int
     topic: str
-    current_level: int
-    target_level: int
+    topics: list[PlanTopicOut]
     start_date: dt.date
     end_date: dt.date
     hours_per_day: float

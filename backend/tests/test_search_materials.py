@@ -10,7 +10,7 @@ from app.search.router import SearchOutcome, search_status
 from app.services import materials as materials_service
 from app.services.materials import DEMO_RETIRED_COMMENT, materials_for_topic
 from tests.conftest import MEMBER
-from tests.test_api import PLAN
+from tests.test_api import plan_body
 
 REAL = [
     SearchCandidate(
@@ -39,7 +39,7 @@ REAL = [
 
 def _make_demo_plan(client) -> None:
     """デモ検索（既定）で Java のプランを作り、デモ教材を ai_pending で残す。"""
-    r = client.post("/api/plans", json={**PLAN, "topic": "Java"}, headers=MEMBER)
+    r = client.post("/api/plans", json=plan_body("Java"), headers=MEMBER)
     assert r.status_code == 201, r.text
     assert all(m["source"] in ("demo", "ai") for m in r.json()["materials"])
 

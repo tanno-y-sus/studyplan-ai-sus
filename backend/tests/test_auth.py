@@ -200,3 +200,12 @@ def test_old_database_is_detected(tmp_path):
     with pytest.raises(OldDatabaseError, match="studyplan.db を削除"):
         check_database(eng)
     check_database(create_engine(f"sqlite:///{tmp_path / 'new.db'}"))  # 空の DB は問題なし
+
+
+def test_single_topic_database_is_detected(tmp_path):
+    eng = create_engine(f"sqlite:///{tmp_path / 'v2.db'}")
+    with eng.begin() as conn:
+        conn.execute(text("CREATE TABLE users (id INTEGER PRIMARY KEY, password_hash TEXT)"))
+        conn.execute(text("CREATE TABLE plans (id INTEGER PRIMARY KEY, topic_id INTEGER)"))
+    with pytest.raises(OldDatabaseError):
+        check_database(eng)

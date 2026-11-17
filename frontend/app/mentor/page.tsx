@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { statusBadge } from "@/components/PlanCard";
 import { Bar, Card, Kpi } from "@/components/ui";
-import { api, fmtDate, type PlanSummary } from "@/lib/api";
+import { api, fmtDate, levelSummary, type PlanSummary } from "@/lib/api";
 
 interface MemberRow {
   user: { id: number; name: string };
@@ -34,7 +34,7 @@ export default function MentorPage() {
       {error && <p className="text-sm text-red-700">{error}</p>}
       {data && (
         <>
-          <div className="flex gap-5">
+          <div className="grid grid-cols-2 gap-3 lg:flex lg:gap-5">
             <Kpi label="担当メンバー" value={`${data.members.length} 名`} />
             <Kpi label="学習中のプラン" value={learning} />
             <Kpi label="遅れているメンバー" value={`${delayed} 名`} tone={delayed ? "text-orange-700" : ""} />
@@ -46,7 +46,8 @@ export default function MentorPage() {
           </div>
           <Card className="flex flex-col gap-3">
             <h2 className="font-bold">メンバー一覧</h2>
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-sm">
               <thead className="bg-slate-50 text-left text-xs text-slate-500">
                 <tr>
                   <th className="px-3 py-2.5">メンバー</th>
@@ -62,7 +63,7 @@ export default function MentorPage() {
                   <tr key={`${m.user.id}-${p?.id ?? i}`} className="border-b border-slate-100">
                     <td className="px-3 py-3">{m.user.name}</td>
                     <td className="px-3 py-3">{p ? <Link className="text-blue-600" href={`/plans/${p.id}`}>{p.topic}</Link> : "―"}</td>
-                    <td className="px-3 py-3">{p ? `Lv${p.current_level} → Lv${p.target_level}` : "―"}</td>
+                    <td className="px-3 py-3">{p ? levelSummary(p.topics) : "―"}</td>
                     <td className="px-3 py-3">{p ? `${fmtDate(p.start_date, false)}〜${fmtDate(p.end_date, false)}` : "―"}</td>
                     <td className="px-3 py-3">{p && <Bar percent={p.progress.percent} />}</td>
                     <td className="px-3 py-3">{p ? statusBadge(p) : <span className="text-xs text-slate-500">プランなし</span>}</td>
@@ -70,6 +71,7 @@ export default function MentorPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </Card>
         </>
       )}

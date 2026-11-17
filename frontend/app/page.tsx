@@ -71,7 +71,7 @@ function Dashboard() {
       )}
 
       {current && (
-        <div className="flex gap-5">
+        <div className="grid grid-cols-2 gap-3 lg:flex lg:gap-5">
           <Kpi label={`達成率（${current.topic}）`} value={`${current.progress.percent}%`} sub={<Bar percent={current.progress.percent} />} />
           <Kpi label="学習の実績" value={`${current.progress.actual_hours}h`} sub={<span className="text-xs text-slate-500">計画 {current.progress.planned_hours}h</span>} />
           <Kpi label="終了日" value={fmtDate(current.end_date)} />
@@ -79,8 +79,8 @@ function Dashboard() {
         </div>
       )}
 
-      <div className="flex gap-5">
-        <Card className="flex flex-[1.4] flex-col gap-3">
+      <div className="flex flex-col gap-5 lg:flex-row">
+        <Card className="flex min-w-0 flex-col gap-3 lg:flex-[1.4]">
           <div className="flex items-center justify-between">
             <h2 className="font-bold">今日のタスク</h2>
             {current && (
@@ -94,7 +94,7 @@ function Dashboard() {
             <TaskRow key={t.id} task={t} onChange={load} />
           ))}
         </Card>
-        <Card className="flex flex-1 flex-col gap-2">
+        <Card className="flex min-w-0 flex-col gap-2 lg:flex-1">
           <h2 className="font-bold">マイプラン</h2>
           {plans.length === 0 && (
             <p className="text-sm text-slate-500">
