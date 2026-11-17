@@ -1,13 +1,27 @@
 from tests.conftest import MEMBER, MEMBER2, MENTOR
 
-PLAN = {
-    "topic": "パイソン",
-    "current_level": 2,
-    "target_level": 4,
-    "start_date": "2026-12-01",
-    "end_date": "2026-12-19",
-    "hours_per_day": 3,
-}
+
+def goal(topic: str, purpose: str = "work", can_do=None, goals=None) -> dict:
+    return {
+        "topic": topic,
+        "purpose": purpose,
+        "can_do": can_do or [],
+        "goals": goals or [f"{topic} を業務で使える"],
+    }
+
+
+def plan_body(*topics: str, **kw) -> dict:
+    body = {
+        "topics": [goal(t) for t in (topics or ("パイソン",))],
+        "start_date": "2026-12-01",
+        "end_date": "2026-12-19",
+        "hours_per_day": 3,
+    }
+    body.update(kw)
+    return body
+
+
+PLAN = plan_body()
 
 
 def test_requires_login(client):
@@ -28,12 +42,9 @@ def test_full_flow(client):
     assert r.json()["status"] == "active"
 
     first = plan["tasks"][0]
-    r = client.patch(
-        f"/api/tasks/{first['id']}",
-        json={"status": "done", "actual_hours": 2.5, "memo": "OK"},
-        headers=MEMBER,
-    )
-    assert r.json()["status"] == "done"
+    r = client.patch(f"/api/tasks/{first['id']}", json={"status": "done", "memo": "OK"}, headers=MEMBER)
+    assert r.json()["task"]["status"] == "done"
+    assert r.json()["task"]["actual_hours"] == first["planned_hours"]  # チェック＝予定どおり
 
     preview = client.post(
         f"/api/plans/{plan['id']}/reschedule/preview", json={"today": "2026-12-03"}, headers=MEMBER
@@ -49,7 +60,7 @@ def test_full_flow(client):
 def test_unknown_topic_uses_search_and_review(client):
     r = client.post(
         "/api/plans",
-        json={**PLAN, "topic": "Kubernetes", "current_level": 1, "target_level": 3},
+        json=plan_body("Kubernetes"),
         headers=MEMBER,
     )
     assert r.status_code == 201, r.text
@@ -68,17 +79,23 @@ def test_unknown_topic_uses_search_and_review(client):
 
 
 def test_too_broad_and_non_it_topics(client):
-    r = client.post("/api/plans", json={**PLAN, "topic": "AWS"}, headers=MEMBER)
+    r = client.post("/api/plans", json=plan_body("AWS"), headers=MEMBER)
     assert r.status_code == 422
     assert "AWS（EC2・VPC）" in r.json()["detail"]["suggestions"]
-    r = client.post("/api/plans", json={**PLAN, "topic": "英語"}, headers=MEMBER)
+    r = client.post("/api/plans", json=plan_body("英語"), headers=MEMBER)
     assert r.status_code == 422
 
 
 def test_input_validation(client):
-    r = client.post("/api/plans", json={**PLAN, "target_level": 1}, headers=MEMBER)
+    no_goal = plan_body()
+    no_goal["topics"][0]["goals"] = []
+    r = client.post("/api/plans", json=no_goal, headers=MEMBER)
     assert r.status_code == 422
-    r = client.post("/api/plans", json={**PLAN, "end_date": "2026-11-01"}, headers=MEMBER)
+    r = client.post("/api/plans", json=plan_body("Python", "python"), headers=MEMBER)
+    assert r.status_code == 422  # 同じ単元が2回
+    r = client.post("/api/plans", json=plan_body(*[f"t{i}" for i in range(6)]), headers=MEMBER)
+    assert r.status_code == 422  # 単元は5つまで
+    r = client.post("/api/plans", json=plan_body(end_date="2026-11-01"), headers=MEMBER)
     assert r.status_code == 422
 
 

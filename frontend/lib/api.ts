@@ -34,10 +34,19 @@ export interface Task {
   actual_hours: number | null;
   memo: string | null;
   material_id: number | null;
+  topic: string | null;
+  remainder_of_id: number | null;
+}
+
+export interface TaskUpdateResult {
+  task: Task;
+  remainder: Task | null;
+  shortfall_hours: number;
 }
 
 export interface Material {
   id: number;
+  topic: string;
   title: string;
   url: string | null;
   type: string;
@@ -65,14 +74,26 @@ export interface Progress {
   today: string;
 }
 
+export interface PlanTopic {
+  name: string;
+  purpose: string;
+  purpose_label: string;
+  purpose_note: string | null;
+  can_do: string[];
+  goals: string[];
+  current_level: number;
+  target_level: number;
+  planned_hours: number;
+  done_hours: number;
+  percent: number;
+}
+
 export interface Plan {
   id: number;
   user_id: number;
   user_name: string;
   topic: string;
-  purpose: string | null;
-  current_level: number;
-  target_level: number;
+  topics: PlanTopic[];
   start_date: string;
   end_date: string;
   hours_per_day: number;
@@ -87,6 +108,8 @@ export interface Plan {
     focus: string;
     dropped: Dropped[];
     allocation: { learn: number; review: number; buffer: number } | null;
+    strategy: string;
+    topic_allocation: { topic: string; hours: number }[];
     check_passed: boolean;
     check_issues: string[];
     retries: number;
@@ -98,8 +121,7 @@ export interface Plan {
 export interface PlanSummary {
   id: number;
   topic: string;
-  current_level: number;
-  target_level: number;
+  topics: PlanTopic[];
   start_date: string;
   end_date: string;
   hours_per_day: number;
@@ -185,6 +207,18 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
+}
+
+/** 単元の色（複数単元のプランで、どの単元のタスクかを見分ける） */
+export const TOPIC_COLORS = ["bg-sky-500", "bg-amber-500", "bg-emerald-500", "bg-rose-500", "bg-violet-500"];
+export function topicColor(plan: { topics: { name: string }[] }, name: string | null | undefined): string {
+  const i = plan.topics.findIndex((t) => t.name === name);
+  return i >= 0 ? TOPIC_COLORS[i % TOPIC_COLORS.length] : "bg-slate-300";
+}
+
+/** 単元ごとのレベルの目安（例：Java Lv2→4 ・ SQL Lv1→3） */
+export function levelSummary(topics: PlanTopic[]): string {
+  return topics.map((t) => `${t.name} Lv${t.current_level}→${t.target_level}`).join(" ・ ");
 }
 
 export const TYPE_LABEL: Record<string, string> = {

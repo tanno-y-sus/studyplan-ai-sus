@@ -8,8 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.ai.base import AIProvider
 from app.config import settings
-from app.models import Material, Plan, PlanAINote, PlanMaterial, Task, User
+from app.models import Material, Plan, PlanAINote, PlanMaterial, PlanTopic, Task, User
 from app.schemas import (
+    PURPOSE_LABEL,
     AINoteOut,
     AITask,
     Allocation,
@@ -19,17 +20,23 @@ from app.schemas import (
     PlanCreate,
     PlanOut,
     PlanSummary,
+    PlanTopicOut,
     RescheduleChange,
     RescheduleContext,
     ReschedulePreview,
     ScheduleContext,
     SectionInfo,
     TaskOut,
+    TaskUpdate,
+    TaskUpdateOut,
+    TopicAllocation,
+    TopicGoal,
 )
 from app.services.calendar import available_dates, count_all_days
 from app.services.materials import materials_for_topic
 from app.services.normalize import resolve_topic
 from app.services.schedule import generate_with_checks, reschedule_with_checks
+from app.services.skills import checklist_for, levels_from_checks
 
 
 def availability(plan_or_data) -> AvailabilityOut:
@@ -51,6 +58,7 @@ def material_info(m: Material, current: int, target: int) -> MaterialInfo:
     has_basis = m.reference_basis and not m.reference_basis.startswith("AI推定")
     return MaterialInfo(
         material_id=m.id,
+        topic=m.topic.name,
         title=m.title,
         type=m.type,
         url=m.url,
@@ -61,32 +69,66 @@ def material_info(m: Material, current: int, target: int) -> MaterialInfo:
     )
 
 
+def _purpose_text(purpose: str, note: str | None) -> str:
+    label = PURPOSE_LABEL.get(purpose, purpose)
+    return f"{label}（{note}）" if note else label
+
+
 def create_plan(db: Session, user: User, data: PlanCreate, ai: AIProvider) -> Plan:
-    topic = resolve_topic(db, data.topic, ai)
     dates = available_dates(data.start_date, data.end_date, data.excluded_weekdays)
     if not dates:
         raise ValueError("期間内に学習できる日がありません。期間や学習しない曜日を見直してください")
-    materials, notes = materials_for_topic(db, topic, data.current_level, data.target_level, ai)
+
+    plan_topics: list[PlanTopic] = []
+    goals: list[TopicGoal] = []
+    materials: list[Material] = []
+    notes: list[str] = []
+    seen_topics: set[int] = set()
+    for i, item in enumerate(data.topics):
+        topic = resolve_topic(db, item.topic, ai)
+        if topic.id in seen_topics:
+            raise ValueError(f"「{topic.name}」が2回入っています")
+        seen_topics.add(topic.id)
+        skills = checklist_for(db, topic, ai)
+        current, target = levels_from_checks(skills, item.can_do, item.goals)
+        plan_topics.append(
+            PlanTopic(
+                topic_id=topic.id,
+                order=i,
+                purpose=item.purpose,
+                purpose_note=item.purpose_note,
+                can_do=item.can_do,
+                goals=item.goals,
+                current_level=current,
+                target_level=target,
+            )
+        )
+        goals.append(
+            TopicGoal(
+                topic=topic.name,
+                purpose=_purpose_text(item.purpose, item.purpose_note),
+                can_do=item.can_do,
+                goals=item.goals,
+                current_level=current,
+                target_level=target,
+            )
+        )
+        found, topic_notes = materials_for_topic(db, topic, current, target, ai, goals=item.goals)
+        materials.extend(found)
+        notes.extend(topic_notes)
 
     ctx = ScheduleContext(
-        topic=topic.name,
-        current_level=data.current_level,
-        target_level=data.target_level,
-        purpose=data.purpose,
+        topics=goals,
         start_date=data.start_date,
         end_date=data.end_date,
         hours_per_day=data.hours_per_day,
         available_dates=dates,
-        materials=[material_info(m, data.current_level, data.target_level) for m in materials],
+        materials=[material_info(m, 0, 0) for m in materials],
     )
     result = generate_with_checks(ai, ctx)
 
     plan = Plan(
         user_id=user.id,
-        topic_id=topic.id,
-        purpose=data.purpose,
-        current_level=data.current_level,
-        target_level=data.target_level,
         start_date=data.start_date,
         end_date=data.end_date,
         hours_per_day=data.hours_per_day,
@@ -94,6 +136,7 @@ def create_plan(db: Session, user: User, data: PlanCreate, ai: AIProvider) -> Pl
         status="proposed",
         warnings=list(notes),
     )
+    plan.plan_topics = plan_topics
     db.add(plan)
     schedule = result.schedule
     times = {t.material_id: t for t in schedule.materials} if schedule else {}
@@ -111,6 +154,8 @@ def create_plan(db: Session, user: User, data: PlanCreate, ai: AIProvider) -> Pl
         provider=ai.name,
         order_reason=schedule.order_reason if schedule else "",
         focus=schedule.focus if schedule else "",
+        strategy=schedule.strategy if schedule else "",
+        topic_allocation=[a.model_dump() for a in schedule.topic_allocation] if schedule else [],
         dropped=[d.model_dump() for d in schedule.dropped] if schedule else [],
         allocation=schedule.allocation.model_dump() if schedule else {},
         check_passed=result.passed,
@@ -161,16 +206,52 @@ def progress(plan: Plan, today: dt.date | None = None) -> dict:
     }
 
 
+def topic_names(plan: Plan) -> str:
+    return " ＋ ".join(pt.topic.name for pt in plan.plan_topics)
+
+
+def _task_topic(t: Task) -> str | None:
+    return t.material.topic.name if t.material is not None else None
+
+
+def task_out(t: Task) -> TaskOut:
+    out = TaskOut.model_validate(t)
+    out.topic = _task_topic(t)
+    return out
+
+
+def topics_out(plan: Plan) -> list[PlanTopicOut]:
+    out = []
+    for pt in plan.plan_topics:
+        tasks = [t for t in plan.tasks if t.type != "buffer" and _task_topic(t) == pt.topic.name]
+        planned = sum(t.planned_hours for t in tasks)
+        done = sum(t.planned_hours for t in tasks if t.status == "done")
+        out.append(
+            PlanTopicOut(
+                name=pt.topic.name,
+                purpose=pt.purpose,
+                purpose_label=PURPOSE_LABEL.get(pt.purpose, pt.purpose),
+                purpose_note=pt.purpose_note,
+                can_do=pt.can_do or [],
+                goals=pt.goals or [],
+                current_level=pt.current_level,
+                target_level=pt.target_level,
+                planned_hours=round(planned, 2),
+                done_hours=round(done, 2),
+                percent=round(done / planned * 100) if planned else 0,
+            )
+        )
+    return out
+
+
 def to_out(plan: Plan) -> PlanOut:
     note = plan.ai_note
     return PlanOut(
         id=plan.id,
         user_id=plan.user_id,
         user_name=plan.user.name,
-        topic=plan.topic.name,
-        purpose=plan.purpose,
-        current_level=plan.current_level,
-        target_level=plan.target_level,
+        topic=topic_names(plan),
+        topics=topics_out(plan),
         start_date=plan.start_date,
         end_date=plan.end_date,
         hours_per_day=plan.hours_per_day,
@@ -181,6 +262,7 @@ def to_out(plan: Plan) -> PlanOut:
         materials=[
             MaterialOut(
                 id=pm.material.id,
+                topic=pm.material.topic.name,
                 title=pm.material.title,
                 url=pm.material.url,
                 type=pm.material.type,
@@ -198,6 +280,8 @@ def to_out(plan: Plan) -> PlanOut:
             provider=note.provider,
             order_reason=note.order_reason,
             focus=note.focus,
+            strategy=note.strategy or "",
+            topic_allocation=[TopicAllocation(**a) for a in (note.topic_allocation or [])],
             dropped=note.dropped,
             allocation=Allocation(**note.allocation) if note.allocation else None,
             check_passed=note.check_passed,
@@ -206,7 +290,7 @@ def to_out(plan: Plan) -> PlanOut:
         )
         if note
         else None,
-        tasks=[TaskOut.model_validate(t) for t in plan.tasks],
+        tasks=[task_out(t) for t in plan.tasks],
         progress=progress(plan),
     )
 
@@ -214,9 +298,8 @@ def to_out(plan: Plan) -> PlanOut:
 def to_summary(plan: Plan) -> PlanSummary:
     return PlanSummary(
         id=plan.id,
-        topic=plan.topic.name,
-        current_level=plan.current_level,
-        target_level=plan.target_level,
+        topic=topic_names(plan),
+        topics=topics_out(plan),
         start_date=plan.start_date,
         end_date=plan.end_date,
         hours_per_day=plan.hours_per_day,
@@ -232,7 +315,7 @@ def reschedule_preview(plan: Plan, ai: AIProvider, today: dt.date | None = None)
     today = today or settings.today()
     pending = [t for t in plan.tasks if t.status == "todo"]
     ctx = RescheduleContext(
-        topic=plan.topic.name,
+        topic=topic_names(plan),
         today=today,
         end_date=plan.end_date,
         hours_per_day=plan.hours_per_day,
@@ -277,3 +360,79 @@ def reschedule_apply(plan: Plan, preview: ReschedulePreview) -> None:
         raise ValueError("確認で問題が見つかったリスケ案は適用できません")
     keep = [t for t in plan.tasks if t.status != "todo"]
     _set_tasks(plan, [(d.date, d.tasks) for d in preview.days], keep=keep)
+
+
+# ---------------------------------------------------------------- タスクの完了と実績（S02・S06）
+REMAINDER_SUFFIX = "（残り）"
+EPS = 1e-6
+
+
+def _merge_remainder(plan: Plan, task: Task) -> None:
+    """以前作った「残り」のタスクがまだ未完了なら、元のタスクに戻す（実績の入れ直し・完了の取り消し用）。"""
+    for r in [t for t in plan.tasks if t.remainder_of_id == task.id and t.status == "todo"]:
+        task.planned_hours = round(task.planned_hours + r.planned_hours, 2)
+        plan.tasks.remove(r)
+
+
+def update_task(db: Session, plan: Plan, task: Task, data: TaskUpdate) -> TaskUpdateOut:
+    """完了チェック・実績の入力。
+
+    - 完了チェック（status=done、実績なし）：予定どおり終わった扱い（実績＝予定時間）
+    - 実績が予定以上：その時間で完了
+    - 実績が予定より少ない：その時間で完了にし、足りない分を「○○（残り）」として未完了で残す
+      （画面はこのあと AI のリスケ案を作り、確認してから反映する）
+    - 完了の取り消し（status=todo）・実績 0：未完了に戻し、実績を空にする（残りのタスクは元に戻す）
+    """
+    if data.memo is not None:
+        task.memo = data.memo
+    remainder: Task | None = None
+    shortfall = 0.0
+
+    def undo() -> None:
+        _merge_remainder(plan, task)
+        task.status = "todo"
+        task.actual_hours = None
+        task.completed_at = None
+
+    def complete(actual: float) -> None:
+        task.status = "done"
+        task.actual_hours = round(actual, 2)
+        task.completed_at = dt.datetime.now(dt.UTC)
+
+    if data.actual_hours is not None:
+        if data.actual_hours <= EPS:
+            undo()
+        else:
+            _merge_remainder(plan, task)
+            planned = task.planned_hours
+            if data.actual_hours + EPS >= planned or task.type == "buffer":
+                complete(data.actual_hours)
+            else:
+                shortfall = round(planned - data.actual_hours, 2)
+                task.planned_hours = round(data.actual_hours, 2)
+                complete(data.actual_hours)
+                base = task.title.removesuffix(REMAINDER_SUFFIX)
+                remainder = Task(
+                    date=task.date,
+                    order=task.order + 1,
+                    title=f"{base}{REMAINDER_SUFFIX}",
+                    type=task.type,
+                    planned_hours=shortfall,
+                    material_id=task.material_id,
+                    remainder_of_id=task.id,
+                )
+                plan.tasks.append(remainder)
+    elif data.status == "done":
+        if task.status != "done":
+            complete(task.planned_hours)
+    elif data.status == "todo":
+        undo()
+    elif data.status == "skipped":
+        task.status = "skipped"
+
+    db.flush()
+    return TaskUpdateOut(
+        task=task_out(task),
+        remainder=task_out(remainder) if remainder is not None else None,
+        shortfall_hours=shortfall,
+    )

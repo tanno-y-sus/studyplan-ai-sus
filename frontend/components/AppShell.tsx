@@ -11,7 +11,12 @@ export const useUser = () => useContext(UserContext);
 
 export function AppShell({ children, crumb, actions }: { children: ReactNode; crumb: ReactNode; actions?: ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // 画面を移動したら、スマホ幅のメニューを閉じる
+  useEffect(() => setMenuOpen(false), [pathname]);
 
   useEffect(() => {
     // ログインしていなければ（Cookie がない・期限切れ）ログイン画面へ
@@ -25,13 +30,31 @@ export function AppShell({ children, crumb, actions }: { children: ReactNode; cr
   return (
     <UserContext.Provider value={user}>
       <div className="flex min-h-screen bg-[#F5F7FB]">
-        <Sidebar user={user} />
+        {/* 幅が広いときは左に固定、狭いとき（スマホなど）はメニューボタンで開く */}
+        <div className="hidden md:block">
+          <Sidebar user={user} />
+        </div>
+        {menuOpen && (
+          <div className="fixed inset-0 z-30 flex md:hidden">
+            <Sidebar user={user} />
+            <button className="flex-1 bg-slate-900/45" aria-label="メニューを閉じる" onClick={() => setMenuOpen(false)} />
+          </div>
+        )}
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-16 items-center justify-between border-b border-slate-200 bg-white px-8">
-            <div className="text-sm text-slate-500">{crumb}</div>
-            <div className="flex gap-2">{actions}</div>
+          <header className="flex min-h-16 flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-3 md:px-8">
+            <div className="flex min-w-0 items-center gap-3 text-sm text-slate-500">
+              <button
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-300 text-slate-700 md:hidden"
+                aria-label="メニューを開く"
+                onClick={() => setMenuOpen(true)}
+              >
+                ☰
+              </button>
+              <div className="min-w-0">{crumb}</div>
+            </div>
+            <div className="flex flex-wrap gap-2">{actions}</div>
           </header>
-          <main className="flex flex-1 flex-col gap-5 px-8 py-7">{children}</main>
+          <main className="flex min-w-0 flex-1 flex-col gap-5 px-4 py-5 md:px-8 md:py-7">{children}</main>
         </div>
       </div>
     </UserContext.Provider>

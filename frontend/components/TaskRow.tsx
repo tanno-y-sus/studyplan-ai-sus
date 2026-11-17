@@ -14,7 +14,8 @@ export function TaskRow({ task, onChange }: { task: Task; onChange?: () => void 
     setBusy(true);
     await api(`/tasks/${task.id}`, {
       method: "PATCH",
-      body: JSON.stringify({ status: done ? "todo" : "done", actual_hours: done ? undefined : task.planned_hours }),
+      // チェック＝予定どおり完了（実績＝計画）。取り消すと実績も消える
+      body: JSON.stringify({ status: done ? "todo" : "done" }),
     });
     setBusy(false);
     onChange?.();

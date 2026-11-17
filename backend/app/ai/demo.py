@@ -25,6 +25,9 @@ from app.schemas import (
     ScheduleContext,
     SearchCandidate,
     SectionInfo,
+    SkillChecklist,
+    SkillItem,
+    TopicAllocation,
     TopicNormalization,
 )
 from app.services.reference_time import extract_hours, video_hours
@@ -88,9 +91,29 @@ class DemoAI:
         name = raw if not raw.isascii() else " ".join(w[:1].upper() + w[1:] for w in raw.split())
         return TopicNormalization(name=name, category=category, is_it=True)
 
+    # ------------------------------------------------------------------ できることのチェックリスト
+    def skill_checklist(self, topic: str, category: str) -> SkillChecklist:
+        """どの単元にも当てはまる一般的なリスト（本物の AI は単元に合わせた具体的な文を作る）。"""
+        texts = [
+            (f"{topic} が何のためのもので、どんな場面で使われるかを説明できる", 1),
+            (f"{topic} の基本用語や仕組みを、自分の言葉で説明できる", 2),
+            (f"{topic} の環境を用意し、チュートリアルどおりに動かせる", 2),
+            (f"{topic} の基本機能を使って、手順書どおりに作業できる", 3),
+            (f"{topic} で小さなものを、自分で調べながら作れる", 3),
+            (f"{topic} のエラーやトラブルの原因を調べて自力で直せる", 4),
+            (f"要件に合わせて {topic} の構成や設計を決められる", 5),
+            (f"{topic} の使い方を他の人に教えられる", 5),
+        ]
+        return SkillChecklist(items=[SkillItem(text=t, level=lv) for t, lv in texts])
+
     # ------------------------------------------------------------------ 教材の選定
     def select_materials(
-        self, topic: str, current_level: int, target_level: int, candidates: list[SearchCandidate]
+        self,
+        topic: str,
+        current_level: int,
+        target_level: int,
+        candidates: list[SearchCandidate],
+        goals: list[str] | None = None,
     ) -> MaterialSelection:
         chosen: list[MaterialChoice] = []
         for wanted in ("official_doc", "article", "video"):
@@ -179,13 +202,30 @@ class DemoAI:
 
         focus_item = max(items, key=lambda it: it.quarters) if items else None
         titles = {m.material_id: m.title for m in ctx.materials}
+        topic_of = {m.material_id: m.topic for m in ctx.materials}
         order = " → ".join(
             _type_label(it.type, titles.get(it.material_id, it.title))
             for it in {it.material_id: it for it in items}.values()
         )
+        topic_names = [g.topic for g in ctx.topics]
+        hours_by_topic = {name: 0.0 for name in topic_names}
+        for _d, tasks in days:
+            for t in tasks:
+                name = topic_of.get(t.material_id) if t.material_id is not None else None
+                if name in hours_by_topic:
+                    hours_by_topic[name] += t.hours
+        if len(topic_names) > 1:
+            strategy = (
+                f"{' → '.join(topic_names)} の順に、1つずつ進めます（デモ AI は入力した順に並べます。"
+                "本物の AI は前提関係や分量から順番・並行を決めます）"
+            )
+        else:
+            strategy = ""
         return AISchedule(
             materials=times,
             allocation=Allocation(learn=learn_used / Q, review=review_used / Q, buffer=buffer_used / Q),
+            strategy=strategy,
+            topic_allocation=[TopicAllocation(topic=n, hours=round(h, 2)) for n, h in hours_by_topic.items()],
             order_reason=f"{order} の順に進めます。全体像をつかんでから手を動かし、最後に実践課題で定着させます",
             focus=(
                 f"「{focus_item.title}」に最も時間を使います（{focus_item.quarters / Q:g}時間）"
@@ -208,12 +248,17 @@ class DemoAI:
         items: list[_Item] = []
         dropped: list[AIDropped] = []
         times: list[AIMaterialTime] = []
-        for m in sorted(ctx.materials, key=lambda m: priority.get(m.type, 9)):
+        topic_index = {g.topic: i for i, g in enumerate(ctx.topics)}
+        levels = {g.topic: (g.current_level, g.target_level) for g in ctx.topics}
+        default_levels = (ctx.topics[0].current_level, ctx.topics[0].target_level) if ctx.topics else (1, 5)
+        # 単元は入力した順に1つずつ。単元の中は 動画 → 公式 → 記事 → 実践課題 の順
+        for m in sorted(ctx.materials, key=lambda m: (topic_index.get(m.topic, 99), priority.get(m.type, 9))):
+            current_level, target_level = levels.get(m.topic, default_levels)
             task_type = {"video": "video", "exercise": "exercise"}.get(m.type, "learn")
             if m.sections:
                 hours = 0.0
                 for s in m.sections:
-                    if s.level_to < ctx.current_level or s.level_from > ctx.target_level:
+                    if s.level_to < current_level or s.level_from > target_level:
                         dropped.append(
                             AIDropped(title=s.title, reason="現在〜目標レベルの範囲外のため対象外")
                         )
@@ -241,8 +286,8 @@ class DemoAI:
                         max(1, _round_q(hours * Q)),
                         task_type,
                         m.material_id,
-                        ctx.current_level,
-                        ctx.target_level,
+                        current_level,
+                        target_level,
                         reviewable=task_type == "learn",
                     )
                 )

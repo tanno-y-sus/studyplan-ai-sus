@@ -15,22 +15,24 @@ from app.models import ApiUsage, Material, Plan, Task, Topic, TopicAlias, User
 from app.schemas import (
     AIStatusOut,
     AvailabilityOut,
-    LevelGuideOut,
+    ChecklistOut,
     PlanCreate,
     PlanOut,
     PlanSummary,
     ReschedulePreview,
     RescheduleRequest,
     ReviewDecision,
-    TaskOut,
+    SkillItem,
     TaskUpdate,
+    TaskUpdateOut,
     TopicSuggestion,
     UsageOut,
 )
 from app.search.router import search_status
 from app.services import plans as plan_service
 from app.services.calendar import available_dates, count_all_days
-from app.services.normalize import GENERIC_LEVEL_GUIDES, TopicError, find_topic
+from app.services.normalize import TopicError, resolve_topic
+from app.services.skills import PURPOSE_LEVELS, checklist_for
 from app.services.usage import latest_usage, period_key
 
 router = APIRouter()
@@ -92,14 +94,33 @@ def suggest_topics(
     ]
 
 
-@router.get("/topics/level-guides", response_model=list[LevelGuideOut])
-def level_guides(
-    topic: str = Query(default=""), db: Session = Depends(get_db), _: User = Depends(current_user)
+@router.get("/topics/checklist", response_model=ChecklistOut)
+def topic_checklist(
+    topic: str = Query(min_length=1, max_length=200),
+    db: Session = Depends(get_db),
+    _: User = Depends(current_user),
+    ai: AIProvider = Depends(ai_provider),
 ):
-    found = find_topic(db, topic) if topic else None
-    if found and found.level_guides:
-        return [LevelGuideOut(level=g.level, description=g.description) for g in found.level_guides]
-    return [LevelGuideOut(level=k, description=v) for k, v in GENERIC_LEVEL_GUIDES.items()]
+    """単元名をそろえ、「できること」チェックリストを返す（なければ AI が作って保存する）。"""
+    try:
+        found = resolve_topic(db, topic, ai)
+        skills = checklist_for(db, found, ai)
+    except TopicError as e:
+        db.rollback()
+        raise HTTPException(status_code=422, detail={"message": str(e), "suggestions": e.suggestions}) from e
+    except AIError as e:
+        if isinstance(e, AIUnavailable):
+            db.rollback()
+            raise
+        db.rollback()
+        raise HTTPException(status_code=422, detail={"message": str(e), "suggestions": []}) from e
+    db.commit()
+    return ChecklistOut(
+        topic=found.name,
+        category=found.category,
+        items=[SkillItem(text=s.text, level=s.level) for s in skills],
+        purpose_levels=PURPOSE_LEVELS,
+    )
 
 
 @router.get("/availability", response_model=AvailabilityOut)
@@ -182,23 +203,17 @@ def delete_plan(plan_id: int, db: Session = Depends(get_db), user: User = Depend
     db.commit()
 
 
-@router.patch("/tasks/{task_id}", response_model=TaskOut)
+@router.patch("/tasks/{task_id}", response_model=TaskUpdateOut)
 def update_task(
     task_id: int, data: TaskUpdate, db: Session = Depends(get_db), user: User = Depends(current_user)
 ):
     task = db.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="タスクが見つかりません")
-    _get_plan(db, task.plan_id, user)
-    if data.status is not None:
-        task.status = data.status
-        task.completed_at = dt.datetime.now(dt.UTC) if data.status == "done" else None
-    if data.actual_hours is not None:
-        task.actual_hours = data.actual_hours
-    if data.memo is not None:
-        task.memo = data.memo
+    plan = _get_plan(db, task.plan_id, user)
+    out = plan_service.update_task(db, plan, task, data)
     db.commit()
-    return task
+    return out
 
 
 @router.post("/plans/{plan_id}/reschedule/preview", response_model=ReschedulePreview)

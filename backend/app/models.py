@@ -48,6 +48,21 @@ class Topic(Base):
         back_populates="topic", cascade="all, delete-orphan", order_by="LevelGuide.level"
     )
     materials: Mapped[list[Material]] = relationship(back_populates="topic", cascade="all, delete-orphan")
+    skills: Mapped[list[TopicSkill]] = relationship(
+        back_populates="topic", cascade="all, delete-orphan", order_by="TopicSkill.order"
+    )
+
+
+class TopicSkill(Base):
+    """単元ごとの「できること」チェックリスト（AI が作り、単元ごとに使い回す）。level は 1〜5 の目安。"""
+
+    __tablename__ = "topic_skills"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    topic_id: Mapped[int] = mapped_column(ForeignKey("topics.id"))
+    order: Mapped[int] = mapped_column(Integer)
+    text: Mapped[str] = mapped_column(String(300))
+    level: Mapped[int] = mapped_column(Integer)
+    topic: Mapped[Topic] = relationship(back_populates="skills")
 
 
 class TopicAlias(Base):
@@ -109,10 +124,6 @@ class Plan(Base):
     __tablename__ = "plans"
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    topic_id: Mapped[int] = mapped_column(ForeignKey("topics.id"))
-    purpose: Mapped[str | None] = mapped_column(Text, nullable=True)
-    current_level: Mapped[int] = mapped_column(Integer)
-    target_level: Mapped[int] = mapped_column(Integer)
     start_date: Mapped[dt.date] = mapped_column(Date)
     end_date: Mapped[dt.date] = mapped_column(Date)
     hours_per_day: Mapped[float] = mapped_column(Float)
@@ -122,7 +133,9 @@ class Plan(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     user: Mapped[User] = relationship()
-    topic: Mapped[Topic] = relationship()
+    plan_topics: Mapped[list[PlanTopic]] = relationship(
+        back_populates="plan", cascade="all, delete-orphan", order_by="PlanTopic.order"
+    )
     plan_materials: Mapped[list[PlanMaterial]] = relationship(
         back_populates="plan", cascade="all, delete-orphan", order_by="PlanMaterial.order"
     )
@@ -132,6 +145,24 @@ class Plan(Base):
     ai_note: Mapped[PlanAINote | None] = relationship(
         back_populates="plan", cascade="all, delete-orphan", uselist=False
     )
+
+
+class PlanTopic(Base):
+    """プランに含まれる単元と、その単元の目的・できること・目標。"""
+
+    __tablename__ = "plan_topics"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    plan_id: Mapped[int] = mapped_column(ForeignKey("plans.id"))
+    topic_id: Mapped[int] = mapped_column(ForeignKey("topics.id"))
+    order: Mapped[int] = mapped_column(Integer)
+    purpose: Mapped[str] = mapped_column(String(20))  # exam / work / basics / other
+    purpose_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    can_do: Mapped[list] = mapped_column(JSON, default=list)  # 今できること
+    goals: Mapped[list] = mapped_column(JSON, default=list)  # できるようになりたいこと
+    current_level: Mapped[int] = mapped_column(Integer)  # チェックから計算した目安（育成担当の一覧用）
+    target_level: Mapped[int] = mapped_column(Integer)
+    plan: Mapped[Plan] = relationship(back_populates="plan_topics")
+    topic: Mapped[Topic] = relationship()
 
 
 class PlanMaterial(Base):
@@ -157,6 +188,8 @@ class PlanAINote(Base):
     focus: Mapped[str] = mapped_column(Text, default="")
     dropped: Mapped[list] = mapped_column(JSON, default=list)
     allocation: Mapped[dict] = mapped_column(JSON, default=dict)
+    strategy: Mapped[str] = mapped_column(Text, default="")  # 複数単元の進め方（順番に／並行して）
+    topic_allocation: Mapped[list] = mapped_column(JSON, default=list)  # [{topic, hours}]
     check_passed: Mapped[bool] = mapped_column(default=False)
     check_issues: Mapped[list] = mapped_column(JSON, default=list)
     retries: Mapped[int] = mapped_column(Integer, default=0)
@@ -177,7 +210,10 @@ class Task(Base):
     actual_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
     memo: Mapped[str | None] = mapped_column(Text, nullable=True)
     completed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # 実績が予定より少なかったときに作る「残り」のタスクは、元のタスクを指す
+    remainder_of_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id"), nullable=True)
     plan: Mapped[Plan] = relationship(back_populates="tasks")
+    material: Mapped[Material | None] = relationship()
 
 
 class ApiUsage(Base):

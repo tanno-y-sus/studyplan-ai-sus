@@ -36,7 +36,7 @@ const ALERTS: Record<Tone, string> = {
 export function Alert({ tone = "blue", title, children }: { tone?: Tone; title?: string; children?: ReactNode }) {
   return (
     <div className={`flex flex-wrap items-start gap-x-3 gap-y-1 rounded-lg border px-4 py-3 text-sm ${ALERTS[tone]}`}>
-      {title && <b className="whitespace-nowrap">{title}</b>}
+      {title && <b className="min-w-0 break-words">{title}</b>}
       {children && <div className="min-w-0 flex-1">{children}</div>}
     </div>
   );

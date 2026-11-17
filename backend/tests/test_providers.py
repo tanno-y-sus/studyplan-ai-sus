@@ -140,3 +140,17 @@ def test_demo_normalize():
     assert not ai.normalize_topic("TOEIC 対策").is_it
     assert ai.normalize_topic("docker").category == "インフラ"
     assert dt.date  # noqa: B018
+
+
+def test_gemini_skill_checklist():
+    items = [{"text": f"できること{i}", "level": lv} for i, lv in enumerate([1, 2, 3, 4, 5, 3])]
+
+    def handler(request: httpx.Request):
+        prompt = json.loads(request.content)["contents"][0]["parts"][0]["text"]
+        assert "Java" in prompt and "できる" in prompt
+        return httpx.Response(
+            200, json={"candidates": [{"content": {"parts": [{"text": json.dumps({"items": items})}]}}]}
+        )
+
+    out = GeminiAI("k", "m", client=_client(handler)).skill_checklist("Java", "言語")
+    assert [i.level for i in out.items] == [1, 2, 3, 4, 5, 3]

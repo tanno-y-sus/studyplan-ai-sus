@@ -51,8 +51,8 @@ export default function ReviewPage() {
 
   return (
     <AppShell crumb={<><b className="text-slate-900">AI提案レビュー</b> ／ レビュー待ち {topics.size} 件</>}>
-      <div className="flex gap-5">
-        <div className="flex w-[330px] flex-col gap-3.5">
+      <div className="flex flex-col gap-5 lg:flex-row">
+        <div className="flex w-full flex-col gap-3.5 lg:w-[330px] lg:shrink-0">
           <Card className="flex flex-col gap-2 p-3">
             <span className="px-2 py-1 text-sm font-bold">レビュー待ち</span>
             {topics.size === 0 && <p className="px-2 text-sm text-slate-500">レビュー待ちはありません</p>}
