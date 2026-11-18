@@ -37,3 +37,10 @@ jobs:
       - run: npm run lint
       - run: npx tsc --noEmit
       - run: npm run build
+
+  docker:
+    # docker compose up --build でつまずかないよう、画面・サーバーのイメージが作れるかを確認する
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose build

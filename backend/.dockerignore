@@ -1,0 +1,10 @@
+# Docker のビルドに送らないもの（自分の PC の仮想環境・DB・キーを入れない）
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+*.db
+.env
+.env.*
+tests

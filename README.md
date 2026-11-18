@@ -93,6 +93,10 @@ http://localhost:3000 を開き、「新規登録」でアカウントを作り�
 docker compose up --build
 ```
 
+- 初回は部品のダウンロードとビルドで数分かかります。2回目からは `docker compose up` で起動できます（コードを更新したら `--build` を付ける）
+- データは Docker の中の PostgreSQL に入ります（ローカル起動の `backend/studyplan.db` とは別なので、新規登録からになります）
+- `.env`（リポジトリ直下）があれば、バックエンドが読み込みます
+
 ## AI・検索の設定（API キー）
 
 キーがなくても **デモ AI・デモ検索** で一通り動きます（外部には通信しません。デモ検索の URL は example.com のダミーです）。
